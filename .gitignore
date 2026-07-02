@@ -72,3 +72,17 @@ Plugins/**/Intermediate/*
 
 # Cache files for the editor to use
 DerivedDataCache/*
+
+# --- InoSherpa additions ---
+# Staged sherpa-onnx static libs are NOT committed (unlike the sibling
+# plugins' staged outputs): onnxruntime.lib alone is ~685 MB, which is
+# over GitHub's 100 MB hard limit. setup-sherpa-onnx.ps1 restores them
+# deterministically from the pinned release; the template's *.lib glob
+# above already keeps them out. The idempotency stamp stays untracked
+# for the same reason.
+Source/ThirdParty/.sherpa_version
+
+# Setup download cache + dev models — populated by the SherpaOnnx/scripts/
+# scripts, safe to wipe, never committed.
+SherpaOnnx/.cache/
+SherpaOnnx/models/

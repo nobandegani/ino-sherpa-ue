@@ -146,9 +146,10 @@ Planned additions as phase 1 lands (naming follows `InoOnnx` /
 │   └── .cache/                      ← downloaded archives (gitignored)
 └── Source/
     └── ThirdParty/
-        ├── Win64/                   ← staged .lib files (gitignored or LFS —
-        │                              decide at implementation time; ~380 MB
-        │                              unpacked)
+        ├── Win64/                   ← staged .lib files (GITIGNORED — ~771 MB
+        │                              unpacked, onnxruntime.lib alone is 685 MB,
+        │                              over GitHub's 100 MB limit; the setup
+        │                              script is the restore path)
         └── Android/ / IOS/ / Mac/   ← later phases
 ```
 
