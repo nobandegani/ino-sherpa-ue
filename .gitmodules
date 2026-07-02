@@ -1,0 +1,3 @@
+[submodule "Vendor/sherpa-onnx"]
+	path = Vendor/sherpa-onnx
+	url = https://github.com/k2-fsa/sherpa-onnx.git
