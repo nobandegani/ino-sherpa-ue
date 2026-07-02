@@ -1,20 +1,22 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Inoland. All Rights Reserved.
 
 #include "InoSherpa.h"
 
-#define LOCTEXT_NAMESPACE "FInoSherpaModule"
+#include "sherpa-onnx/c-api/c-api.h"
+
+DEFINE_LOG_CATEGORY(LogInoSherpa);
 
 void FInoSherpaModule::StartupModule()
 {
-	// This code will execute after your module is loaded into memory; the exact timing is specified in the .uplugin file per-module
+	// Statically linked -- this call doubles as the link-sanity check: if
+	// the 14 staged .lib files didn't resolve, we'd never get here.
+	UE_LOG(LogInoSherpa, Log, TEXT("Sherpa: Module up. sherpa-onnx %hs (git %hs)"),
+		SherpaOnnxGetVersionStr(), SherpaOnnxGetGitSha1());
 }
 
 void FInoSherpaModule::ShutdownModule()
 {
-	// This function may be called during shutdown to clean up your module.  For modules that support dynamic reloading,
-	// we call this function before unloading the module.
+	UE_LOG(LogInoSherpa, Log, TEXT("Sherpa: Module down."));
 }
 
-#undef LOCTEXT_NAMESPACE
-	
 IMPLEMENT_MODULE(FInoSherpaModule, InoSherpa)
