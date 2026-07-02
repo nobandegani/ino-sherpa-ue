@@ -6,117 +6,202 @@ the project root's `CLAUDE.md`.
 
 ## Purpose
 
-`InoSherpa` is an Unreal Engine 5.8 runtime plugin whose job is to
-**integrate k2-fsa's sherpa-onnx speech toolkit and expose it as a UE
-module** that other plugins (eventually `InoAgents`) declare as a
-dependency. sherpa-onnx provides on-device, offline speech capabilities
-on top of ONNX Runtime:
+`InoSherpa` is an Unreal Engine 5.8 runtime plugin that **integrates
+k2-fsa's sherpa-onnx speech toolkit statically and exposes two
+Blueprint-callable game-instance subsystems**:
 
-- **TTS** — Piper (VITS), Kokoro, Matcha-TTS, and others, including the
-  full text frontend (espeak-ng phonemization, G2P).
-- **ASR** — streaming + non-streaming (Zipformer, Whisper, Paraformer,
-  SenseVoice, Moonshine).
-- **Extras** — VAD (Silero/TEN), speaker ID/diarization, keyword
-  spotting, punctuation restoration, audio tagging, speech enhancement.
+- **`UInoTTS`** — on-device text-to-speech (Piper/VITS shipping; Kokoro
+  config plumbed, wiring next). Sync, async, and streaming (per-sentence
+  audio chunks) APIs, mid-generation cancellation.
+- **`UInoSTT`** — on-device speech-to-text (streaming Zipformer
+  transducer). Push-only audio input, live partial results, endpoint
+  auto-segmentation, plus sync/async whole-clip one-shots.
 
-Upstream: https://github.com/k2-fsa/sherpa-onnx
+Upstream: https://github.com/k2-fsa/sherpa-onnx — it also offers VAD,
+speaker ID/diarization, keyword spotting, etc., which can slot into this
+plugin later using the same patterns.
 
 ## Status / roadmap
 
-**Windows-first.** The plugin is being brought up on Win64 only; other
-platforms follow after Windows is fully finished. Every architectural
-decision, however, is made with all target platforms in mind — the
-per-platform strategy below is settled, only the implementation is
-phased.
-
-1. ⏳ **Phase 1 — Win64** (in progress): setup script staging the
-   official static release libs, `Build.cs` wiring, module skeleton,
-   smoke test, first TTS/ASR API surface.
+1. ✅ **Phase 1 — Win64** (shipped): official static release libs staged
+   by setup script; both subsystems implemented and smoke-tested against
+   Piper (`vits-piper-en_US-libritts_r-medium`) and streaming Zipformer
+   (`sherpa-onnx-streaming-zipformer-en-2023-06-26`).
 2. ⏳ **Phase 2 — Android** (arm64-v8a): self-built static libs from
    `Vendor/sherpa-onnx` (see "Why Android is self-built").
-3. ⏳ **Phase 3 — iOS / macOS** as project needs dictate: official
-   static release artifacts.
-
-Present state: empty module skeleton (template `InoSherpa.h/.cpp`) +
-the vendored upstream submodule. Nothing is wired yet.
+3. ⏳ **Phase 3 — iOS / macOS**: official static release artifacts.
 
 ## The one core decision: static everywhere
 
 sherpa-onnx bundles its **own** ONNX Runtime (their build, CPU-only).
 The engine process is already crowded with ONNX Runtimes: UE's NNE
-plugin ships `onnxruntime.dll` (1.19.x), marketplace plugins ship
-their own, and our sibling `InoOnnx` stages a renamed DirectML build
-(`InoOnnxRuntime.dll` / `libInoOnnxRuntime.so` — see
-`Plugins/InoOnnx/CLAUDE.md` "Why we rename the DLLs / .so" for the
-full failure-mode catalog: Windows base-name DLL cache, Android SONAME
+plugin ships `onnxruntime.dll` (1.19.x), marketplace plugins ship their
+own, and our sibling `InoOnnx` stages a renamed DirectML build — see
+`Plugins/InoOnnx/CLAUDE.md` "Why we rename the DLLs / .so" for the full
+failure-mode catalog (Windows base-name DLL cache, Android SONAME
 aliasing).
 
-sherpa-onnx's **shared** release packages ship a plain-named
-`onnxruntime.dll` / `libonnxruntime.so` next to the sherpa libs — that
-would re-create exactly the collisions InoOnnx's renames solved.
+sherpa's **shared** release packages ship a plain-named
+`onnxruntime.dll` / `libonnxruntime.so` — which would re-create exactly
+those collisions.
 
-**Therefore InoSherpa links sherpa-onnx and its ONNX Runtime
-STATICALLY on every platform.** All of sherpa + its ORT ends up inside
-our own uniquely-named module binary with no exports; no plain-named
-ORT binary is ever shipped. Collisions become structurally impossible
-without any rename surgery.
+**Therefore InoSherpa links sherpa-onnx and its ONNX Runtime STATICALLY
+on every platform.** Everything ends up inside `UnrealEditor-InoSherpa.dll`
+(or the platform equivalent) with no exports; no plain-named ORT binary
+ever ships. Collisions are structurally impossible with zero rename
+surgery.
 
 Consequences:
 
-- InoSherpa's ORT is CPU-only (that's all upstream links into their
-  static packages). Fine for speech workloads. `InoOnnx` remains the
-  accelerated (DirectML) path for everything else — the two ORT copies
-  coexist because neither exports nor ships a plain-named binary.
-- No `PreLoadingScreen` loading phase needed, unlike the DLL-staging
-  siblings (`InoOnnx`, `InoLlama`, `InoLiteRT`) — there is no separate
-  runtime binary to pre-load. `LoadingPhase=Default` is correct here.
+- InoSherpa's ORT is CPU-only (all upstream's static packages contain).
+  Fine for speech workloads; `InoOnnx` remains the accelerated
+  (DirectML) path for everything else. The two ORT copies coexist.
+- `LoadingPhase=Default` (NOT `PreLoadingScreen` like the DLL-staging
+  siblings) — there is no runtime binary to pre-load.
+- No Live Coding DLL-notification hazards (no runtime DLLs at all) —
+  contrast with InoLlama's `%TEMP%` scratch-dir workaround.
 
-## Per-platform artifact strategy
+## UE-side architecture
 
-Verified against the v1.13.3 release (2026-06-15, 294 assets):
+One module, two subsystems, three module-private native classes:
 
-| Platform | Source of static libs | Notes |
+| Class | Kind | Role |
 |---|---|---|
-| **Win64** (phase 1) | Official release: `sherpa-onnx-v<ver>-win-x64-static-MD-Release-lib.tar.bz2` | 14 `.lib` files incl. static `onnxruntime.lib` (ORT 1.24.4, their build), espeak-ng, kaldi-fbank, piper-phonemize, ssentencepiece, ucd, kissfft. **MD** CRT matches UE's `/MD`. No headers in the archive — headers come from `Vendor/sherpa-onnx`. |
-| **Android** arm64-v8a (phase 2) | **Self-built** from `Vendor/sherpa-onnx` | No usable static release exists (see below). Build with `SHERPA_ONNX_ENABLE_C_API=ON`, `SHERPA_ONNX_ENABLE_JNI=OFF`, static ORT (`BUILD_SHARED_LIBS=OFF` path pulls `onnxruntime-android-arm64-v8a-static_lib`). |
-| **iOS** (phase 3) | Official release: `sherpa-onnx-v<ver>-ios.tar.bz2` | `sherpa-onnx.xcframework` with merged `libsherpa-onnx.a` (+ C API headers) plus a **separate** static `onnxruntime.xcframework` (ORT 1.26.0). ⚠ InoOnnx on iOS also statically links its ORT (1.24.3) into the main executable — shipping both plugins on iOS requires unifying on ONE ORT static archive or the link fails on duplicate `Ort*` symbols. Decide when iOS enters scope. |
-| **macOS** (phase 3) | Official release: `osx-arm64-static` / `osx-universal2-static` packages | Same shape as Win64 static. |
-| Linux | Official release: `linux-x64-static` packages | Not a project target; slots in if ever needed. |
+| `UInoTTS` (`Public/TTS/InoTTSSubsystem.h`) | `UGameInstanceSubsystem` | TTS API surface; Pattern-A threading |
+| `UInoSTT` (`Public/STT/InoSTTSubsystem.h`) | `UGameInstanceSubsystem` | STT API surface; owns the stream worker |
+| `FInoTtsEngine` (`Private/TTS/`) | plain C++, `TSharedPtr` | owns `SherpaOnnxOfflineTts`; blocking `Generate` with cancel/chunk trampoline |
+| `FInoSttRecognizer` (`Private/STT/`) | plain C++, `TSharedPtr` | owns `SherpaOnnxOnlineRecognizer`; `TranscribeOnce` for one-shots |
+| `FInoSttStreamWorker` (`Private/STT/`) | `FRunnable` | exclusively owns one `SherpaOnnxOnlineStream` + its thread |
 
-Why Android is self-built: the release has no static-libs package for
-Android. The only "static ORT" Android artifact
-(`android-static-link-onnxruntime.tar.bz2`) contains **only
-`libsherpa-onnx-jni.so`** — JNI for Kotlin/Java apps, no
-`libsherpa-onnx-c-api.so` — unusable from UE native code. The regular
-`android.tar.bz2` has the C API lib but next to a plain-named
-`libonnxruntime.so` (SONAME-aliasing hazard). Upstream's
-`build-android-arm64-v8a.sh` supports exactly the combination we need;
-it requires an Android NDK (point `ANDROID_NDK` at the one UE 5.8
-uses) and a bash-capable shell.
+Threading (copied from the InoAgents house patterns — see
+`Plugins/InoAgents/Source/InoNeuTTS/.../InoNeuTTSSubsystem.cpp` and
+`.../InoLiteRtLmConversationWorker.h`):
 
-## Version pinning
+- **All public subsystem methods are game-thread-only; all delegates
+  fire on the game thread.**
+- **TTS = Pattern A**: `Async(ThreadPool)` per operation +
+  `AsyncTask(GameThread)` marshaling + `TWeakObjectPtr` guards + per-op
+  `TSharedPtr<std::atomic<bool>>` cancel flag + `bSynthInFlight`
+  single-op invariant. Cancellation is real: the sherpa progress
+  callback returns 0 and generation stops; the result carries partial
+  audio + `bWasCancelled`.
+- **STT = Pattern B**: sherpa's online API has NO internal locking —
+  every call on a stream must be serialized. `FInoSttStreamWorker` is
+  the only thread touching the stream: game thread produces into an
+  SPSC `TQueue` (+ `FEvent` wake), worker consumes
+  (AcceptWaveform → decode pump → dispatch). Its destructor **joins the
+  thread before destroying the stream** (never free mid-call).
+- One-shot `Transcribe*` is refused while a streaming session is active
+  (single-decode-at-a-time invariant — concurrent decoding of two
+  streams of one recognizer has no upstream thread-safety guarantee).
 
-- Pinned upstream version: **v1.13.3** (record in a `SHERPA_VERSION`
-  file once the setup script lands, following the sibling-plugin
-  pattern).
-- Upstream has **no release branch** — development happens on `master`
-  and version tags are cut from it. Prebuilt release assets exist only
-  for tags.
-- `Vendor/sherpa-onnx` (git submodule) must be pinned to the **same
-  tag** as the release artifacts we stage, because:
-  1. C API headers (`sherpa-onnx/c-api/c-api.h`, `cxx-api.h`) are
-     consumed from the submodule — Win64 `-lib` release archives ship
-     no headers.
-  2. Android builds compile the submodule source directly.
-  The setup script should enforce tag == pinned version, the way
-  `InoLlama`'s does. (Known drift right now: the submodule sits on
-  `master @ ca668535`, 15 commits past v1.13.3 — re-pin when the setup
-  script lands.)
-- sherpa's ORT builds come from
-  https://github.com/csukuangfj/onnxruntime-libs (their own ORT
-  builds); the version is dictated by the sherpa release / cmake files,
-  not by us. It intentionally does NOT need to match InoOnnx's pinned
-  ORT — the copies are isolated.
+STT streaming behavior:
+
+- Partials dispatch only when the text changed (anti-flood).
+- Endpoint (pause detected) → `OnFinal` + `OnEndpoint` + auto stream
+  reset; silence-only endpoints reset quietly (no event spam).
+- `FinishStream` appends **0.6 s of silence tail-padding** before
+  `InputFinished` — without it the utterance's last word is truncated
+  (upstream examples pad the same way) — then recreates the stream so
+  the session survives for the next utterance.
+
+## Wire format
+
+`TArray<uint8>` **int16 mono PCM little-endian** + `SampleRate` metadata
+(the cross-plugin lingua franca). TTS emits the model's native rate
+(22050 for Piper medium) and never resamples — playback is the caller's
+concern (RuntimeAudioImporter's `UStreamingSoundWave` /
+`USoundWaveProcedural`; UE's mixer converts rates at the sink). STT
+accepts pushes at ANY rate (int16 bytes or float32) — sherpa resamples
+internally to the model's 16 kHz.
+
+`Private/InoSherpaPcm.{h,cpp}` holds the float32↔int16 converters + a
+strict mono WAV reader/writer (mirrors `UInoAudioFunctionLibrary` shapes
+WITHOUT depending on InoAgents — runtime plugins never depend on their
+consumers).
+
+## Setup
+
+```powershell
+cd Plugins/InoSherpa/SherpaOnnx/scripts
+./setup-sherpa-onnx.ps1     # stage the Win64 static libs (idempotent)
+./get-dev-models.ps1        # optional: Piper + Zipformer dev models
+```
+
+The setup script reads `SherpaOnnx/SHERPA_VERSION` (currently `1.13.3`),
+verifies `Vendor/sherpa-onnx` is checked out at tag `v<ver>` (headers
+are consumed from the submodule — they MUST match the staged libs),
+downloads `sherpa-onnx-v<ver>-win-x64-static-MD-Release-lib.tar.bz2`
+from GitHub releases into gitignored `SherpaOnnx/.cache/`, and stages
+all 14 static libs into `Source/ThirdParty/Win64/`. Idempotency stamp:
+`Source/ThirdParty/.sherpa_version`. `clean.ps1` wipes it all.
+
+**Staged libs are NOT committed** (unlike sibling plugins'
+`Source/ThirdParty` outputs): `onnxruntime.lib` alone is ~685 MB — over
+GitHub's 100 MB hard limit. Fresh clones run:
+
+```powershell
+git submodule update --init
+./SherpaOnnx/scripts/setup-sherpa-onnx.ps1
+```
+
+`InoSherpa.Build.cs` throws a `BuildException` pointing at the script
+when the libs are missing.
+
+### Bumping the pin
+
+```powershell
+# 1. Edit SherpaOnnx/SHERPA_VERSION (e.g. 1.14.0)
+# 2. Sync vendor submodule to the SAME tag (the script enforces this)
+git -C Plugins/InoSherpa/Vendor/sherpa-onnx fetch --tags
+git -C Plugins/InoSherpa/Vendor/sherpa-onnx checkout v1.14.0
+# 3. Re-run setup; it warns about new unlisted libs in the archive
+./setup-sherpa-onnx.ps1
+```
+
+Upstream has **no release branch** — master + version tags; prebuilt
+assets exist only for tags.
+
+## Build wiring (Win64)
+
+- The 14 `.lib` files go through `PublicAdditionalLibraries`; no
+  `RuntimeDependencies` / delay-load (nothing to stage — that's the
+  point of static).
+- `PrivateIncludePaths` → `Vendor/sherpa-onnx` for
+  `#include "sherpa-onnx/c-api/c-api.h"`. **PRIVATE on purpose: sherpa
+  types never leak past this module.** Consumers only see `Ino*` types.
+- **Define nothing**: with neither `SHERPA_ONNX_BUILD_SHARED_LIBS` nor
+  `SHERPA_ONNX_BUILD_MAIN_LIB` defined, `SHERPA_ONNX_API` expands empty
+  on Win32 — plain declarations, correct for static linking.
+- MD-Release libs match UE's `/MD` CRT. No extra Win32 system libs were
+  needed. `bUseUnity=false` (file-static console commands in smoke-test
+  TUs).
+- Use the non-deprecated `SherpaOnnxOfflineTtsGenerateWithConfig` (the
+  older `SherpaOnnxOfflineTtsGenerate*` family is `SHERPA_ONNX_DEPRECATED`
+  → C4996).
+
+## Smoke tests
+
+Console commands (self-registering `FAutoConsoleCommand`s under
+`Private/SmokeTests/`; all need a PIE / `-game` world; delegate landing
+pads are small `UObject` helpers since dynamic delegates bind UFUNCTIONs
+only):
+
+| Command | What it proves |
+|---|---|
+| `Ino.Sherpa.TTS.LoadTest <vits.onnx> <tokens.txt> <espeak-ng-data-dir>` | sync Piper load; logs rate/speakers |
+| `Ino.Sherpa.TTS.SynthTest <text...>` | streaming synth; chunk delegates; writes `Saved/InoSherpa/tts.wav` |
+| `Ino.Sherpa.TTS.CancelTest [text...]` | mid-generation cancel → partial audio + `bWasCancelled` |
+| `Ino.Sherpa.STT.LoadTest <enc> <dec> <joiner> <tokens>` | sync Zipformer load |
+| `Ino.Sherpa.STT.TranscribeTest <mono.wav>` | sync one-shot; text matches `test_wavs/trans.txt` |
+| `Ino.Sherpa.STT.StreamTest <mono.wav>` | full worker path: paced 100 ms pushes → growing partials → final |
+
+Headless one-liner used for verification (from a shell):
+
+```
+UnrealEditor-Cmd.exe <uproject> -game -NullRHI -unattended -nosplash -nosound
+    -ExecCmds="Ino.Sherpa.STT.LoadTest ..., Ino.Sherpa.STT.StreamTest ..." -abslog=<log>
+```
 
 ## Layout
 
@@ -125,44 +210,45 @@ Plugins/InoSherpa/
 ├── CLAUDE.md                        ← this file
 ├── InoSherpa.uplugin                ← Runtime module, LoadingPhase=Default
 ├── Vendor/
-│   └── sherpa-onnx/                 ← upstream git submodule (headers for
-│                                      all platforms; source for Android
-│                                      self-build). Pin = release tag.
+│   └── sherpa-onnx/                 ← upstream git submodule @ v1.13.3
+│                                      (headers for all platforms; source
+│                                       for the phase-2 Android self-build)
+├── SherpaOnnx/                      ← setup workspace
+│   ├── SHERPA_VERSION               ← pinned upstream version ("1.13.3")
+│   ├── scripts/
+│   │   ├── setup-sherpa-onnx.ps1    ← stages Win64 static libs, enforces
+│   │   │                              submodule tag match
+│   │   ├── clean.ps1                ← wipes cache + staged libs + stamp
+│   │   └── get-dev-models.ps1       ← Piper + Zipformer dev models
+│   ├── .cache/                      ← downloads (gitignored)
+│   └── models/                      ← dev models (gitignored)
 └── Source/
+    ├── ThirdParty/
+    │   ├── .sherpa_version          ← stamp (gitignored)
+    │   └── Win64/                   ← 14 staged .lib (GITIGNORED, ~771 MB;
+    │                                  onnxruntime.lib alone 685 MB — setup
+    │                                  script is the restore path)
     └── InoSherpa/
         ├── InoSherpa.Build.cs
-        ├── Public/InoSherpa.h       ← template skeleton (to be replaced)
-        └── Private/InoSherpa.cpp    ← template skeleton (to be replaced)
+        ├── Public/
+        │   ├── InoSherpa.h          ← module + LogInoSherpa
+        │   ├── Sherpa/InoSherpaTypes.h  ← EInoSherpaProvider, EInoTTSModelType
+        │   ├── TTS/InoTTSTypes.h    ← configs/options/result + delegates
+        │   ├── TTS/InoTTSSubsystem.h← UInoTTS
+        │   ├── STT/InoSTTTypes.h    ← config/result + delegates
+        │   └── STT/InoSTTSubsystem.h← UInoSTT
+        └── Private/
+            ├── InoSherpa.cpp        ← logs sherpa version (link sanity)
+            ├── InoSherpaPcm.{h,cpp} ← int16<->float32 + WAV read/write
+            ├── TTS/InoTtsEngine.{h,cpp}
+            ├── TTS/InoTTSSubsystem.cpp
+            ├── STT/InoSttRecognizer.{h,cpp}
+            ├── STT/InoSttStreamWorker.{h,cpp}
+            ├── STT/InoSTTSubsystem.cpp
+            └── SmokeTests/          ← console commands + UObject helpers
 ```
 
-Planned additions as phase 1 lands (naming follows `InoOnnx` /
-`InoLlama` conventions):
-
-```
-├── SherpaOnnx/                      ← setup workspace
-│   ├── SHERPA_VERSION               ← pinned upstream tag (e.g. "1.13.3")
-│   ├── scripts/setup-sherpa-onnx.ps1← downloads + stages release static libs,
-│   │                                  enforces Vendor submodule tag match
-│   └── .cache/                      ← downloaded archives (gitignored)
-└── Source/
-    └── ThirdParty/
-        ├── Win64/                   ← staged .lib files (GITIGNORED — ~771 MB
-        │                              unpacked, onnxruntime.lib alone is 685 MB,
-        │                              over GitHub's 100 MB limit; the setup
-        │                              script is the restore path)
-        └── Android/ / IOS/ / Mac/   ← later phases
-```
-
-## Naming
-
-All plugin-facing types are `Ino`-prefixed (`FInoSherpaModule`,
-`FInoSherpaTts…`, `EInoSherpa…`), matching the rule enforced across
-the sibling plugins. Upstream symbols stay behind the module boundary;
-consumers never include sherpa headers directly.
-
-## How other plugins will consume this (planned)
-
-Same pattern as the siblings:
+## How other plugins consume this
 
 ```csharp
 PublicDependencyModuleNames.Add("InoSherpa");
@@ -172,26 +258,56 @@ PublicDependencyModuleNames.Add("InoSherpa");
 "Plugins": [ { "Name": "InoSherpa", "Enabled": true } ]
 ```
 
-Consumer-facing API surface (TTS first, ASR later) will be a C++
-wrapper in `Public/` — shape TBD in phase 1; look at
-`InoOnnx`'s two-level API (raw + RAII wrapper) for the house style.
+```cpp
+#include "TTS/InoTTSSubsystem.h"
+UInoTTS* Tts = GetGameInstance()->GetSubsystem<UInoTTS>();
+Tts->LoadModelAsync(Config, OnLoaded);
+Tts->SynthesizeStreamAsync(Text, Options, OnChunk, OnComplete);
+```
+
+Blueprint reaches both subsystems via the standard Get Game Instance
+Subsystem node. Delegates carry `FInoTTSResult` / `FInoSTTResult`.
+
+## Per-platform artifact strategy (phases 2-3 reference)
+
+| Platform | Source of static libs | Notes |
+|---|---|---|
+| **Win64** ✅ | Official `win-x64-static-MD-Release-lib` release package | shipped |
+| **Android** arm64-v8a | **Self-built** from `Vendor/sherpa-onnx` | No usable static release exists: the `android-static-link-onnxruntime` artifact is **JNI-only** (no `libsherpa-onnx-c-api.so`) and the regular android tarball ships a plain-named `libonnxruntime.so` (SONAME hazard). Build with `SHERPA_ONNX_ENABLE_C_API=ON`, `SHERPA_ONNX_ENABLE_JNI=OFF`, static ORT; upstream's `build-android-arm64-v8a.sh` supports exactly this (needs an NDK). |
+| **iOS** | Official `ios.tar.bz2` | `sherpa-onnx.xcframework` (merged `libsherpa-onnx.a` + C API headers) + separate static `onnxruntime.xcframework`. ⚠ InoOnnx on iOS also statically links its ORT into the executable — shipping both requires unifying on ONE ORT static archive (duplicate `Ort*` symbols otherwise). |
+| **macOS** | Official `osx-{arm64,universal2}-static` packages | same shape as Win64 |
+
+sherpa's ORT builds come from https://github.com/csukuangfj/onnxruntime-libs;
+the version is dictated by the sherpa release, not by us, and does NOT
+need to match InoOnnx's pin — the copies are isolated.
+
+## Naming
+
+All plugin-facing types are `Ino`-prefixed (`UInoTTS`, `UInoSTT`,
+`FInoTTS*`, `FInoSTT*`, `EInoSherpa*`), matching the rule enforced
+across the sibling plugins. Upstream sherpa symbols stay behind the
+module boundary.
 
 ## Git hygiene
 
 This directory is its **own git repository** (vendored-but-live inside
-the demo project, like every `Plugins/<Name>/`). Commits go to this
-repo with `git -C Plugins/InoSherpa …`, never through the project
-repo. `Vendor/sherpa-onnx` is a submodule of THIS repo; fresh clones
-need `git submodule update --init`.
+the demo project). Commits go to this repo with
+`git -C Plugins/InoSherpa …`, never through the project repo.
+`Vendor/sherpa-onnx` is a submodule of THIS repo; fresh clones need
+`git submodule update --init` + the setup script (staged libs are not
+in git — see "Setup").
 
 ## Authoritative references
 
 - sherpa-onnx repo: https://github.com/k2-fsa/sherpa-onnx
-- Releases (prebuilt artifacts): https://github.com/k2-fsa/sherpa-onnx/releases
+- Releases (prebuilt artifacts + models): https://github.com/k2-fsa/sherpa-onnx/releases
 - Docs: https://k2-fsa.github.io/sherpa/onnx/
 - C API header (in submodule): `Vendor/sherpa-onnx/sherpa-onnx/c-api/c-api.h`
 - Upstream Android build script: `Vendor/sherpa-onnx/build-android-arm64-v8a.sh`
-- Their ORT builds: https://github.com/csukuangfj/onnxruntime-libs
-- Sibling plugin docs this file leans on:
-  - `Plugins/InoOnnx/CLAUDE.md` — the ORT-collision failure catalog + rename pattern we deliberately avoid needing
-  - `Plugins/InoLlama/CLAUDE.md` — the setup-script / version-pin / vendor-submodule-sync pattern to copy
+- Sibling plugin docs this plugin leans on:
+  - `Plugins/InoOnnx/CLAUDE.md` — the ORT-collision failure catalog the
+    static-everywhere decision avoids
+  - `Plugins/InoLlama/CLAUDE.md` — the setup-script / version-pin /
+    vendor-submodule-sync pattern this plugin copies
+  - `Plugins/InoAgents` (NeuTTS subsystem + LiteRtLm worker) — the
+    threading + delegate house patterns the subsystems copy
