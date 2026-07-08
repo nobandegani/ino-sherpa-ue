@@ -32,7 +32,7 @@ class FInoSttStreamWorker : public FRunnable
 {
 public:
 	FInoSttStreamWorker(const TSharedPtr<FInoSttRecognizer, ESPMode::ThreadSafe>& InRecognizer,
-		const TWeakObjectPtr<UInoSTT>& InWeakOwner);
+		const TWeakObjectPtr<UInoSTT>& InWeakOwner, int32 InSessionSerial);
 	virtual ~FInoSttStreamWorker() override;
 
 	/** False when stream/thread creation failed; owner drops the worker. */
@@ -71,8 +71,15 @@ private:
 	void DispatchFinal(const FString& Text) const;
 	void DispatchEndpoint() const;
 
+	/** Worker hit an unrecoverable error; owner should drop the session. */
+	void DispatchSessionDead() const;
+
 	TSharedPtr<FInoSttRecognizer, ESPMode::ThreadSafe> Recognizer;
 	TWeakObjectPtr<UInoSTT> WeakOwner;
+
+	/** Stamped into every dispatch so the owner can drop events queued by
+	 *  a previous session after a same-frame StopStream -> StartStream. */
+	int32 SessionSerial = 0;
 
 	/** Worker-thread-owned after construction. */
 	const SherpaOnnxOnlineStream* Stream = nullptr;
@@ -84,4 +91,13 @@ private:
 
 	/** Worker-thread only: last partial text sent (anti-flood gate). */
 	FString LastDispatchedText;
+
+	/**
+	 * Worker-thread only: the first sample rate this stream saw. sherpa's
+	 * feature extractor keys its internal resampler to the FIRST rate and
+	 * hard-EXITs the process on any later mismatch (features.cc), so the
+	 * tail padding must use this rate and mismatched pushes are dropped.
+	 * 0 until the first push; cleared on stream recreation.
+	 */
+	int32 EstablishedRate = 0;
 };

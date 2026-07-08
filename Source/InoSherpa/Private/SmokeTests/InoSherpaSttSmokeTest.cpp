@@ -149,6 +149,10 @@ void RunStreamTest(const TArray<FString>& Args)
 		return;
 	}
 
+	// Optional 2nd arg: number of passes over the same audio. Passes >= 2
+	// exercise the FinishStream -> stream-recreation -> next-utterance path.
+	const int32 NumPasses = Args.Num() >= 2 ? FMath::Max(1, FCString::Atoi(*Args[1])) : 1;
+
 	TArray<float> Samples;
 	int32 Rate = 0;
 	if (!LoadWavArg(Args, Samples, Rate)) { return; }
@@ -181,10 +185,12 @@ void RunStreamTest(const TArray<FString>& Args)
 		TArray<float> Samples;
 		int32 Rate = 0;
 		int32 Cursor = 0;
+		int32 PassesRemaining = 1;
 	};
 	TSharedPtr<FPushState> State = MakeShared<FPushState>();
 	State->Samples = MoveTemp(Samples);
 	State->Rate = Rate;
+	State->PassesRemaining = NumPasses;
 
 	TWeakObjectPtr<UInoSTT> WeakStt(Stt);
 	GStreamTickerHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
@@ -202,6 +208,14 @@ void RunStreamTest(const TArray<FString>& Args)
 			{
 				UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: input exhausted -> FinishStream"));
 				SttNow->FinishStream();
+				if (--State->PassesRemaining > 0)
+				{
+					// Next pass rides the SAME session: pushes queued after
+					// Finish land on the recreated stream.
+					UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: starting next pass (%d left)"), State->PassesRemaining);
+					State->Cursor = 0;
+					return true;
+				}
 				GStreamTickerHandle.Reset();
 				return false;
 			}
@@ -212,8 +226,60 @@ void RunStreamTest(const TArray<FString>& Args)
 			return true; // keep ticking
 		}), 0.1f);
 
-	UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: StreamTest started (%.2fs of audio, 100ms chunks)"),
-		static_cast<float>(State->Samples.Num()) / State->Rate);
+	UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: StreamTest started (%.2fs of audio, 100ms chunks, %d pass(es))"),
+		static_cast<float>(State->Samples.Num()) / State->Rate, NumPasses);
+}
+
+void RunAbortTest(const TArray<FString>& Args)
+{
+	UInoSTT* Stt = GetStt();
+	if (Stt == nullptr) { return; }
+	if (!Stt->IsModelLoaded())
+	{
+		UE_LOG(LogInoSherpa, Error, TEXT("STT.SmokeTest: no model loaded -- run Ino.Sherpa.STT.LoadTest first"));
+		return;
+	}
+
+	TArray<float> Samples;
+	int32 Rate = 0;
+	if (!LoadWavArg(Args, Samples, Rate)) { return; }
+
+	StopStreamTicker();
+	if (Stt->IsStreaming())
+	{
+		Stt->StopStream();
+	}
+
+	GActiveSttHelper.Reset(NewObject<UInoSherpaSttSmokeHelper>());
+	FInoSTTResultDelegate OnPartial;
+	OnPartial.BindDynamic(GActiveSttHelper.Get(), &UInoSherpaSttSmokeHelper::HandlePartial);
+	FInoSTTFinalDelegate OnFinal;
+	OnFinal.BindDynamic(GActiveSttHelper.Get(), &UInoSherpaSttSmokeHelper::HandleFinal);
+	FInoSTTEndpointDelegate OnEndpoint;
+	OnEndpoint.BindDynamic(GActiveSttHelper.Get(), &UInoSherpaSttSmokeHelper::HandleEndpoint);
+
+	// Session 1: shove ~1s of audio at the worker and tear the session
+	// down immediately -- StopStream must join cleanly while the worker is
+	// (very likely) mid-decode.
+	Stt->StartStream(OnPartial, OnFinal, OnEndpoint);
+	if (!Stt->IsStreaming()) { return; }
+	const int32 OneSecond = FMath::Min(Samples.Num(), Rate);
+	TArray<float> Burst(Samples.GetData(), OneSecond);
+	Stt->PushAudioFloat(Burst, Rate);
+	Stt->StopStream();
+	UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: AbortTest -- mid-decode StopStream survived"));
+
+	// Session 2 on the same model: full clip + Finish; a correct final
+	// here proves the recognizer survived the aborted session.
+	Stt->StartStream(OnPartial, OnFinal, OnEndpoint);
+	if (!Stt->IsStreaming())
+	{
+		UE_LOG(LogInoSherpa, Error, TEXT("STT.SmokeTest: AbortTest FAILED -- could not restart session"));
+		return;
+	}
+	Stt->PushAudioFloat(Samples, Rate);
+	Stt->FinishStream();
+	UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: AbortTest session 2 pushed %d samples; expecting a FINAL"), Samples.Num());
 }
 
 FAutoConsoleCommand GSttLoadTestCmd(
@@ -228,6 +294,11 @@ FAutoConsoleCommand GSttTranscribeTestCmd(
 
 FAutoConsoleCommand GSttStreamTestCmd(
 	TEXT("Ino.Sherpa.STT.StreamTest"),
-	TEXT("Ino.Sherpa.STT.StreamTest <mono.wav> -- streaming session with paced pushes; logs partials/finals/endpoints."),
+	TEXT("Ino.Sherpa.STT.StreamTest <mono.wav> [passes] -- streaming session with paced pushes; logs partials/finals/endpoints. passes>=2 exercises session reuse after FinishStream."),
 	FConsoleCommandWithArgsDelegate::CreateStatic(&RunStreamTest));
+
+FAutoConsoleCommand GSttAbortTestCmd(
+	TEXT("Ino.Sherpa.STT.AbortTest"),
+	TEXT("Ino.Sherpa.STT.AbortTest <mono.wav> -- StopStream mid-decode, then a fresh session; expects a clean FINAL from session 2."),
+	FConsoleCommandWithArgsDelegate::CreateStatic(&RunAbortTest));
 } // namespace

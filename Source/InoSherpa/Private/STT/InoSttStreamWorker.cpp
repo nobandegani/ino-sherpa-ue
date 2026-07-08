@@ -12,9 +12,10 @@
 #include "sherpa-onnx/c-api/c-api.h"
 
 FInoSttStreamWorker::FInoSttStreamWorker(const TSharedPtr<FInoSttRecognizer, ESPMode::ThreadSafe>& InRecognizer,
-	const TWeakObjectPtr<UInoSTT>& InWeakOwner)
+	const TWeakObjectPtr<UInoSTT>& InWeakOwner, int32 InSessionSerial)
 	: Recognizer(InRecognizer)
 	, WeakOwner(InWeakOwner)
+	, SessionSerial(InSessionSerial)
 {
 	check(Recognizer.IsValid());
 
@@ -107,6 +108,20 @@ uint32 FInoSttStreamWorker::Run()
 			case FSttCommand::EType::PushAudio:
 				if (Cmd.Samples.Num() > 0)
 				{
+					// sherpa keys the stream's resampler to the FIRST rate
+					// it sees and process-EXITs on any later mismatch --
+					// drop offending chunks instead of dying.
+					if (EstablishedRate == 0)
+					{
+						EstablishedRate = Cmd.SampleRate;
+					}
+					else if (Cmd.SampleRate != EstablishedRate)
+					{
+						UE_LOG(LogInoSherpa, Error,
+							TEXT("STT: dropped %d samples pushed at %d Hz -- this stream is locked to %d Hz (keep the rate consistent per session)"),
+							Cmd.Samples.Num(), Cmd.SampleRate, EstablishedRate);
+						break;
+					}
 					SherpaOnnxOnlineStreamAcceptWaveform(Stream, Cmd.SampleRate, Cmd.Samples.GetData(), Cmd.Samples.Num());
 					PumpAndDispatch();
 				}
@@ -116,11 +131,13 @@ uint32 FInoSttStreamWorker::Run()
 			{
 				// Tail padding: without trailing right-context the last
 				// word of the utterance gets truncated (upstream examples
-				// pad the same way).
-				const int32 FeatRate = Recognizer->GetFeatSampleRate();
+				// pad the same way). MUST use the stream's established
+				// rate -- a different rate here is a hard process exit
+				// inside sherpa (features.cc resampler check).
+				const int32 TailRate = EstablishedRate != 0 ? EstablishedRate : Recognizer->GetFeatSampleRate();
 				TArray<float> TailSilence;
-				TailSilence.AddZeroed(FMath::Max(1, (FeatRate * 6) / 10)); // 0.6s
-				SherpaOnnxOnlineStreamAcceptWaveform(Stream, FeatRate, TailSilence.GetData(), TailSilence.Num());
+				TailSilence.AddZeroed(FMath::Max(1, (TailRate * 6) / 10)); // 0.6s
+				SherpaOnnxOnlineStreamAcceptWaveform(Stream, TailRate, TailSilence.GetData(), TailSilence.Num());
 
 				SherpaOnnxOnlineStreamInputFinished(Stream);
 				while (SherpaOnnxIsOnlineStreamReady(Rec, Stream))
@@ -203,21 +220,24 @@ void FInoSttStreamWorker::RecreateStream()
 	SherpaOnnxDestroyOnlineStream(Stream);
 	Stream = SherpaOnnxCreateOnlineStream(Recognizer->GetHandle());
 	LastDispatchedText.Empty();
+	EstablishedRate = 0; // fresh stream = fresh feature extractor
 	if (Stream == nullptr)
 	{
 		UE_LOG(LogInoSherpa, Error, TEXT("STT: stream recreation after Finish failed"));
 		bStopRequested = true;
+		DispatchSessionDead(); // owner drops the session instead of zombie-ing
 	}
 }
 
 void FInoSttStreamWorker::DispatchPartial(const FString& Text) const
 {
 	TWeakObjectPtr<UInoSTT> Weak = WeakOwner;
-	AsyncTask(ENamedThreads::GameThread, [Weak, Text]()
+	const int32 Serial = SessionSerial;
+	AsyncTask(ENamedThreads::GameThread, [Weak, Text, Serial]()
 	{
 		if (UInoSTT* Owner = Weak.Get())
 		{
-			Owner->NotifyPartialFromWorker(Text);
+			Owner->NotifyPartialFromWorker(Text, Serial);
 		}
 	});
 }
@@ -225,11 +245,12 @@ void FInoSttStreamWorker::DispatchPartial(const FString& Text) const
 void FInoSttStreamWorker::DispatchFinal(const FString& Text) const
 {
 	TWeakObjectPtr<UInoSTT> Weak = WeakOwner;
-	AsyncTask(ENamedThreads::GameThread, [Weak, Text]()
+	const int32 Serial = SessionSerial;
+	AsyncTask(ENamedThreads::GameThread, [Weak, Text, Serial]()
 	{
 		if (UInoSTT* Owner = Weak.Get())
 		{
-			Owner->NotifyFinalFromWorker(Text);
+			Owner->NotifyFinalFromWorker(Text, Serial);
 		}
 	});
 }
@@ -237,11 +258,25 @@ void FInoSttStreamWorker::DispatchFinal(const FString& Text) const
 void FInoSttStreamWorker::DispatchEndpoint() const
 {
 	TWeakObjectPtr<UInoSTT> Weak = WeakOwner;
-	AsyncTask(ENamedThreads::GameThread, [Weak]()
+	const int32 Serial = SessionSerial;
+	AsyncTask(ENamedThreads::GameThread, [Weak, Serial]()
 	{
 		if (UInoSTT* Owner = Weak.Get())
 		{
-			Owner->NotifyEndpointFromWorker();
+			Owner->NotifyEndpointFromWorker(Serial);
+		}
+	});
+}
+
+void FInoSttStreamWorker::DispatchSessionDead() const
+{
+	TWeakObjectPtr<UInoSTT> Weak = WeakOwner;
+	const int32 Serial = SessionSerial;
+	AsyncTask(ENamedThreads::GameThread, [Weak, Serial]()
+	{
+		if (UInoSTT* Owner = Weak.Get())
+		{
+			Owner->NotifyWorkerDiedFromWorker(Serial);
 		}
 	});
 }

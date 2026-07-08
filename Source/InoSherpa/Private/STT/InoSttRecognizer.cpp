@@ -84,6 +84,11 @@ FInoSttRecognizer::~FInoSttRecognizer()
 
 FString FInoSttRecognizer::TranscribeOnce(TArrayView<const float> Samples, int32 SampleRate) const
 {
+	if (Samples.Num() == 0 || SampleRate <= 0)
+	{
+		return FString();
+	}
+
 	const SherpaOnnxOnlineStream* Stream = SherpaOnnxCreateOnlineStream(Recognizer);
 	if (Stream == nullptr)
 	{
@@ -93,10 +98,13 @@ FString FInoSttRecognizer::TranscribeOnce(TArrayView<const float> Samples, int32
 	SherpaOnnxOnlineStreamAcceptWaveform(Stream, SampleRate, Samples.GetData(), Samples.Num());
 
 	// Tail padding: streaming models need trailing right-context or the
-	// last word gets truncated (upstream examples do the same).
+	// last word gets truncated (upstream examples do the same). MUST be at
+	// the SAME rate as the audio above -- sherpa locks the stream's
+	// resampler to the first rate it sees and process-EXITs on a mismatch
+	// (features.cc).
 	TArray<float> TailSilence;
-	TailSilence.AddZeroed(FMath::Max(1, (FeatSampleRate * 6) / 10)); // 0.6s
-	SherpaOnnxOnlineStreamAcceptWaveform(Stream, FeatSampleRate, TailSilence.GetData(), TailSilence.Num());
+	TailSilence.AddZeroed(FMath::Max(1, (SampleRate * 6) / 10)); // 0.6s
+	SherpaOnnxOnlineStreamAcceptWaveform(Stream, SampleRate, TailSilence.GetData(), TailSilence.Num());
 
 	SherpaOnnxOnlineStreamInputFinished(Stream);
 	while (SherpaOnnxIsOnlineStreamReady(Recognizer, Stream))

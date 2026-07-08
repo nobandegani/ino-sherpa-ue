@@ -113,13 +113,21 @@ void UInoSTT::StartStream(const FInoSTTResultDelegate& OnPartial,
 		UE_LOG(LogInoSherpa, Warning, TEXT("STT: StartStream while already streaming -- call StopStream first; ignoring"));
 		return;
 	}
+	// Single-decode-at-a-time invariant also holds against one-shots: an
+	// in-flight TranscribeAsync is decoding its own stream on the pool.
+	if (bTranscribeInFlight)
+	{
+		UE_LOG(LogInoSherpa, Warning, TEXT("STT: StartStream while a TranscribeAsync is in flight -- retry after it completes; ignoring"));
+		return;
+	}
 
 	OnPartialDelegate = OnPartial;
 	OnFinalDelegate = OnFinal;
 	OnEndpointDelegate = OnEndpoint;
+	++StreamSessionSerial; // invalidates any still-queued old-session events
 
 	TSharedPtr<FInoSttStreamWorker> NewWorker =
-		MakeShared<FInoSttStreamWorker>(Recognizer, TWeakObjectPtr<UInoSTT>(this));
+		MakeShared<FInoSttStreamWorker>(Recognizer, TWeakObjectPtr<UInoSTT>(this), StreamSessionSerial);
 	if (!NewWorker->IsHealthy())
 	{
 		UE_LOG(LogInoSherpa, Error, TEXT("STT: failed to start streaming session"));
@@ -190,6 +198,7 @@ void UInoSTT::StopStream()
 		StreamWorker.Reset(); // dtor joins the thread, then frees the stream
 		UE_LOG(LogInoSherpa, Log, TEXT("STT: streaming session stopped"));
 	}
+	++StreamSessionSerial; // drop this session's still-queued events
 	OnPartialDelegate.Unbind();
 	OnFinalDelegate.Unbind();
 	OnEndpointDelegate.Unbind();
@@ -285,23 +294,45 @@ void UInoSTT::TranscribeAsync(const TArray<float>& Samples, int32 SampleRate,
 	});
 }
 
-void UInoSTT::NotifyPartialFromWorker(const FString& Text)
+void UInoSTT::NotifyPartialFromWorker(const FString& Text, int32 SessionSerial)
 {
+	if (SessionSerial != StreamSessionSerial)
+	{
+		return; // stale event from a previous session
+	}
 	FInoSTTResult Result;
 	Result.Text = Text;
 	Result.bIsFinal = false;
 	OnPartialDelegate.ExecuteIfBound(Result);
 }
 
-void UInoSTT::NotifyFinalFromWorker(const FString& Text)
+void UInoSTT::NotifyFinalFromWorker(const FString& Text, int32 SessionSerial)
 {
+	if (SessionSerial != StreamSessionSerial)
+	{
+		return;
+	}
 	FInoSTTResult Result;
 	Result.Text = Text;
 	Result.bIsFinal = true;
 	OnFinalDelegate.ExecuteIfBound(Result);
 }
 
-void UInoSTT::NotifyEndpointFromWorker()
+void UInoSTT::NotifyEndpointFromWorker(int32 SessionSerial)
 {
+	if (SessionSerial != StreamSessionSerial)
+	{
+		return;
+	}
 	OnEndpointDelegate.ExecuteIfBound();
+}
+
+void UInoSTT::NotifyWorkerDiedFromWorker(int32 SessionSerial)
+{
+	if (SessionSerial != StreamSessionSerial || !StreamWorker.IsValid())
+	{
+		return;
+	}
+	UE_LOG(LogInoSherpa, Error, TEXT("STT: streaming worker died (stream recreation failed) -- dropping the session"));
+	StopStream(); // joins the already-exited thread; unbinds; bumps serial
 }

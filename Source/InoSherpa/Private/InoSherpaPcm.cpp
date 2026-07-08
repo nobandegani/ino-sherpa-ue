@@ -9,6 +9,9 @@
 namespace InoSherpaPcm
 {
 
+// Scale convention: encode x32767, decode /32768 -- matches InoAgents'
+// UInoAudioFunctionLibrary. Round-trip of exactly -32768 loses one LSB;
+// irrelevant for speech, kept for cross-plugin consistency.
 void Float32ToInt16PcmBytesMono(TArrayView<const float> Samples, TArray<uint8>& OutBytes)
 {
 	const int32 FirstByte = OutBytes.Num();
@@ -120,28 +123,31 @@ bool ReadMonoWavAsFloat32(const FString& Path, TArray<float>& OutSamples, int32&
 		return static_cast<uint16>(File[At]) | (static_cast<uint16>(File[At + 1]) << 8);
 	};
 
-	// Walk RIFF chunks: capture fmt, then data.
+	// Walk RIFF chunks: capture fmt, then data. int64 cursor + monotonic
+	// advance guard so a hostile/malformed chunk size can't overflow into
+	// an out-of-bounds read.
 	uint16 Format = 0, NumChannels = 0, BitsPerSample = 0;
 	uint32 SampleRate = 0;
 	int32 DataOffset = -1;
 	uint32 DataSize = 0;
-	int32 At = 12;
+	int64 At = 12;
 	while (At + 8 <= File.Num())
 	{
-		const uint32 ChunkSize = ReadU32(At + 4);
-		if (FMemory::Memcmp(File.GetData() + At, "fmt ", 4) == 0 && ChunkSize >= 16 && At + 8 + 16 <= File.Num())
+		const int32 At32 = static_cast<int32>(At);
+		const uint32 ChunkSize = ReadU32(At32 + 4);
+		if (FMemory::Memcmp(File.GetData() + At32, "fmt ", 4) == 0 && ChunkSize >= 16 && At + 8 + 16 <= File.Num())
 		{
-			Format        = ReadU16(At + 8);
-			NumChannels   = ReadU16(At + 10);
-			SampleRate    = ReadU32(At + 12);
-			BitsPerSample = ReadU16(At + 22);
+			Format        = ReadU16(At32 + 8);
+			NumChannels   = ReadU16(At32 + 10);
+			SampleRate    = ReadU32(At32 + 12);
+			BitsPerSample = ReadU16(At32 + 22);
 		}
-		else if (FMemory::Memcmp(File.GetData() + At, "data", 4) == 0)
+		else if (FMemory::Memcmp(File.GetData() + At32, "data", 4) == 0)
 		{
-			DataOffset = At + 8;
+			DataOffset = At32 + 8;
 			DataSize = FMath::Min(ChunkSize, static_cast<uint32>(File.Num() - DataOffset));
 		}
-		At += 8 + static_cast<int32>(ChunkSize) + (ChunkSize & 1); // chunks are word-aligned
+		At += 8 + static_cast<int64>(ChunkSize) + (ChunkSize & 1); // chunks are word-aligned
 	}
 
 	if (DataOffset < 0 || SampleRate == 0)

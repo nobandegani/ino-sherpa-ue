@@ -70,11 +70,15 @@ public:
 		const FInoSTTFinalDelegate& OnFinal,
 		const FInoSTTEndpointDelegate& OnEndpoint);
 
-	/** Push int16 mono PCM LE bytes at the CALLER's sample rate. */
+	/** Push int16 mono PCM LE bytes at the CALLER's sample rate. Any rate
+	 *  works, but it must stay THE SAME for the whole session -- chunks at
+	 *  a different rate are dropped with an error (sherpa locks a stream's
+	 *  resampler to the first rate it sees). */
 	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT")
 	void PushAudioInt16(const TArray<uint8>& Int16PcmLE, int32 SampleRate);
 
-	/** Push float32 mono samples [-1,1] at the CALLER's sample rate. */
+	/** Push float32 mono samples [-1,1] at the CALLER's sample rate. Same
+	 *  keep-the-rate-consistent rule as PushAudioInt16. */
 	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT")
 	void PushAudioFloat(const TArray<float>& Samples, int32 SampleRate);
 
@@ -110,10 +114,13 @@ public:
 		const FInoSTTFinalDelegate& OnComplete);
 
 	// ---- Worker -> game-thread notifications (internal; do not call) ------
+	// SessionSerial guards against events queued by a previous session
+	// arriving after a same-frame StopStream -> StartStream.
 
-	void NotifyPartialFromWorker(const FString& Text);
-	void NotifyFinalFromWorker(const FString& Text);
-	void NotifyEndpointFromWorker();
+	void NotifyPartialFromWorker(const FString& Text, int32 SessionSerial);
+	void NotifyFinalFromWorker(const FString& Text, int32 SessionSerial);
+	void NotifyEndpointFromWorker(int32 SessionSerial);
+	void NotifyWorkerDiedFromWorker(int32 SessionSerial);
 
 private:
 	/** Owns the sherpa recognizer; shared so workers outlive UnloadModel. */
@@ -127,6 +134,9 @@ private:
 	FInoSTTResultDelegate OnPartialDelegate;
 	FInoSTTFinalDelegate OnFinalDelegate;
 	FInoSTTEndpointDelegate OnEndpointDelegate;
+
+	/** Bumped on every StartStream/StopStream; stamps worker dispatches. */
+	int32 StreamSessionSerial = 0;
 
 	bool bIsLoading = false;
 	bool bTranscribeInFlight = false;
