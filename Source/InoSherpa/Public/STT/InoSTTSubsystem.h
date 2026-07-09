@@ -8,6 +8,7 @@
 
 #include "InoSTTSubsystem.generated.h"
 
+class FInoCancellationToken;
 class FInoSttOfflineRecognizer;
 class FInoSttRecognizer;
 class FInoSttStreamWorker;
@@ -147,6 +148,33 @@ public:
 	void TranscribeOfflineAsync(const TArray<float>& Samples, int32 SampleRate,
 		const FInoSTTFinalDelegate& OnComplete);
 
+	// ---- Settings-driven download + load -----------------------------------
+	// Model sources live in Project Settings -> Plugins -> InoSherpa. These
+	// download whatever is missing (InoNodes: cached-skip, resume, retries,
+	// optional SHA-256) and then load the model. OnDownloadProgress fires per
+	// tick on the game thread (OverallProgressPercent spans all files);
+	// OnLoaded fires exactly once. Already-downloaded models skip straight
+	// to the load.
+
+	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT", meta = (AutoCreateRefTerm = "OnDownloadProgress,OnLoaded"))
+	void LoadStreamingModelFromSettingsAsync(const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
+		const FInoSTTLoadedDelegate& OnLoaded);
+
+	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT", meta = (AutoCreateRefTerm = "OnDownloadProgress,OnLoaded"))
+	void LoadOfflineModelFromSettingsAsync(const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
+		const FInoSTTLoadedDelegate& OnLoaded);
+
+	/** Cheap file-stat probe (no hashing) -- safe to poll from UMG. */
+	UFUNCTION(BlueprintPure, Category = "InoSherpa|STT")
+	bool IsStreamingModelDownloaded() const;
+
+	UFUNCTION(BlueprintPure, Category = "InoSherpa|STT")
+	bool IsOfflineModelDownloaded() const;
+
+	/** Cancels an in-flight settings-driven download (OnLoaded fires with failure). */
+	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT")
+	void CancelModelDownload();
+
 	// ---- Worker -> game-thread notifications (internal; do not call) ------
 	// SessionSerial guards against events queued by a previous session
 	// arriving after a same-frame StopStream -> StartStream.
@@ -174,6 +202,9 @@ private:
 
 	/** Bumped on every StartStream/StopStream; stamps worker dispatches. */
 	int32 StreamSessionSerial = 0;
+
+	/** Cancel signal for the in-flight settings-driven download, if any. */
+	TSharedPtr<FInoCancellationToken, ESPMode::ThreadSafe> ActiveDownloadToken;
 
 	bool bIsLoading = false;
 	bool bTranscribeInFlight = false;

@@ -48,6 +48,28 @@ void UInoSherpaSttSmokeHelper::HandleEndpoint()
 	UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: endpoint #%d"), NumEndpoints);
 }
 
+void UInoSherpaSttSmokeHelper::HandleLoaded(bool bSuccess, FString ErrorMessage)
+{
+	UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: OnLoaded -- %s%s%s"),
+		bSuccess ? TEXT("SUCCESS") : TEXT("FAILED"),
+		bSuccess ? TEXT("") : TEXT(": "), *ErrorMessage);
+}
+
+void UInoSherpaSttSmokeHelper::HandleDownloadProgress(const FInoDownloadProgress& Progress)
+{
+	// Throttle: log on file change or every 10% of overall progress.
+	const int32 TenPercent = static_cast<int32>(Progress.OverallProgressPercent / 10.0f);
+	if (Progress.CurrentFileIndex == LastLoggedFileIndex && TenPercent == LastLoggedTenPercent)
+	{
+		return;
+	}
+	LastLoggedFileIndex = Progress.CurrentFileIndex;
+	LastLoggedTenPercent = TenPercent;
+	UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: download %d/%d '%s' %.0f%% (overall %.0f%%, %.1f MB/s)"),
+		Progress.CurrentFileIndex + 1, Progress.TotalFiles, *Progress.CurrentFileName,
+		Progress.ProgressPercent, Progress.OverallProgressPercent, Progress.BytesPerSecond / (1024.0f * 1024.0f));
+}
+
 namespace
 {
 TStrongObjectPtr<UInoSherpaSttSmokeHelper> GActiveSttHelper;
@@ -388,4 +410,35 @@ FAutoConsoleCommand GSttOfflineTranscribeAsyncTestCmd(
 	TEXT("Ino.Sherpa.STT.OfflineTranscribeAsyncTest"),
 	TEXT("Ino.Sherpa.STT.OfflineTranscribeAsyncTest <mono.wav> -- async offline one-shot via delegate."),
 	FConsoleCommandWithArgsDelegate::CreateStatic(&RunOfflineTranscribeAsyncTest));
+
+// ---- Settings-driven download + load ------------------------------------
+
+void RunSettingsLoadTest(const TArray<FString>& Args)
+{
+	const FString Which = Args.Num() > 0 ? Args[0].ToLower() : TEXT("streaming");
+	UInoSTT* Stt = GetStt();
+	if (Stt == nullptr) { return; }
+
+	GActiveSttHelper.Reset(NewObject<UInoSherpaSttSmokeHelper>());
+	FInoSTTDownloadProgressDelegate OnProgress;
+	OnProgress.BindDynamic(GActiveSttHelper.Get(), &UInoSherpaSttSmokeHelper::HandleDownloadProgress);
+	FInoSTTLoadedDelegate OnLoaded;
+	OnLoaded.BindDynamic(GActiveSttHelper.Get(), &UInoSherpaSttSmokeHelper::HandleLoaded);
+
+	if (Which == TEXT("offline"))
+	{
+		UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: SettingsLoadTest offline (downloaded=%d)"), Stt->IsOfflineModelDownloaded() ? 1 : 0);
+		Stt->LoadOfflineModelFromSettingsAsync(OnProgress, OnLoaded);
+	}
+	else
+	{
+		UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: SettingsLoadTest streaming (downloaded=%d)"), Stt->IsStreamingModelDownloaded() ? 1 : 0);
+		Stt->LoadStreamingModelFromSettingsAsync(OnProgress, OnLoaded);
+	}
+}
+
+FAutoConsoleCommand GSttSettingsLoadTestCmd(
+	TEXT("Ino.Sherpa.STT.SettingsLoadTest"),
+	TEXT("Ino.Sherpa.STT.SettingsLoadTest [streaming|offline] -- download from Project Settings sources (cached-skip) then load."),
+	FConsoleCommandWithArgsDelegate::CreateStatic(&RunSettingsLoadTest));
 } // namespace

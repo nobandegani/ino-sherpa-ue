@@ -113,6 +113,39 @@ STT streaming behavior:
   (upstream examples pad the same way) — then recreates the stream so
   the session survives for the next utterance.
 
+## Settings-driven model downloads
+
+`UInoSherpaSettings` (Project Settings → Plugins → InoSherpa,
+`Public/InoSherpaSettings.h`, Config=Game defaultconfig) holds one
+download source per STT model — `StreamingSttModel` (Zipformer) and
+`OfflineSttModel` (Parakeet). sherpa models are multi-file, so each
+source is FOUR file slots (Encoder/Decoder/Joiner/Tokens), each with
+`Url`, optional `LocalFileName` (empty = derived from URL), optional
+`ExpectedSha256`, optional `FileSizeBytes`. Defaults point at the public
+Hugging Face mirrors (int8 variants; ~70 MB Zipformer, ~630 MB
+Parakeet) — override with your own CDN for shipping.
+
+`UInoSTT::LoadStreamingModelFromSettingsAsync` /
+`LoadOfflineModelFromSettingsAsync` download whatever is missing via the
+**InoNodes** downloader (cached-skip, resume, retries, optional SHA-256,
+`OnDownloadProgress` per tick with batch-wide `OverallProgressPercent`)
+into `<ProjectPersistentDownloadDir>/InoSherpa/<ModelDirName>/`, then
+chain into the existing load path. `IsStreamingModelDownloaded()` /
+`IsOfflineModelDownloaded()` are stat-probes (UMG-safe);
+`CancelModelDownload()` aborts mid-download; `Deinitialize` cancels
+automatically. This mirrors the InoAgents Gemma flow
+(`UInoLiteRtLmSettings` + `LoadModelAsync`) adapted for multi-file
+models.
+
+InoSherpa therefore depends on the **InoNodes** plugin (`.uplugin`
+Plugins list + `PublicDependencyModuleNames`) — a base-utility
+dependency, same direction as InoAgents' use of it.
+
+TTS (Piper) is NOT settings-driven yet: Piper bundles include the
+espeak-ng-data DIRECTORY (hundreds of files) which doesn't fit per-file
+downloads — needs an archive step; revisit when TTS model distribution
+matters.
+
 ## Wire format
 
 `TArray<uint8>` **int16 mono PCM little-endian** + `SampleRate` metadata
@@ -207,6 +240,7 @@ only):
 | `Ino.Sherpa.STT.OfflineLoadTest <enc> <dec> <joiner> <tokens>` | sync Parakeet (NeMo transducer) load |
 | `Ino.Sherpa.STT.OfflineTranscribeTest <mono.wav>` | sync offline one-shot (punctuated, cased text) |
 | `Ino.Sherpa.STT.OfflineTranscribeAsyncTest <mono.wav>` | async offline one-shot via delegate |
+| `Ino.Sherpa.STT.SettingsLoadTest [streaming\|offline]` | Project-Settings download (cached-skip) → load, with progress ticks |
 
 Headless one-liner used for verification (from a shell):
 

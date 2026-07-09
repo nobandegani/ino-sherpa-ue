@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "InoDownloader.h" // InoNodes -- FInoDownloadProgress for the download delegate
 #include "Sherpa/InoSherpaTypes.h"
 
 #include "InoSTTTypes.generated.h"
@@ -252,3 +253,6 @@ DECLARE_DYNAMIC_DELEGATE_OneParam(FInoSTTFinalDelegate, const FInoSTTResult&, Re
 
 /** Payload-less endpoint cue (fires right after the final it segments). Game thread. */
 DECLARE_DYNAMIC_DELEGATE(FInoSTTEndpointDelegate);
+
+/** Model download progress (per file + overall batch). Game thread. */
+DECLARE_DYNAMIC_DELEGATE_OneParam(FInoSTTDownloadProgressDelegate, const FInoDownloadProgress&, Progress);

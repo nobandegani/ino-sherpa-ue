@@ -27,7 +27,17 @@ public:
 	UFUNCTION()
 	void HandleEndpoint();
 
+	UFUNCTION()
+	void HandleLoaded(bool bSuccess, FString ErrorMessage);
+
+	UFUNCTION()
+	void HandleDownloadProgress(const FInoDownloadProgress& Progress);
+
 	int32 NumPartials = 0;
 	int32 NumFinals = 0;
 	int32 NumEndpoints = 0;
+
+	// Download-progress log throttle state.
+	int32 LastLoggedTenPercent = -1;
+	int32 LastLoggedFileIndex = -1;
 };

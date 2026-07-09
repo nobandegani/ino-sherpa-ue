@@ -4,17 +4,65 @@
 
 #include "InoSherpa.h"
 #include "InoSherpaPcm.h"
+#include "InoSherpaSettings.h"
 #include "STT/InoSttOfflineRecognizer.h"
 #include "STT/InoSttRecognizer.h"
 #include "STT/InoSttStreamWorker.h"
 
 #include "Async/Async.h"
 
+namespace
+{
+/** Requests for a model's four files, in a FIXED order the completion
+ *  handler relies on: encoder, decoder, joiner, tokens. */
+void BuildModelDownloadRequests(const FInoSherpaTransducerModelSource& Model, TArray<FInoDownloadRequest>& OutRequests)
+{
+	const FString SaveDir = UInoSherpaSettings::ResolveModelDir(Model);
+	for (const FInoSherpaModelFileSource* File : { &Model.Encoder, &Model.Decoder, &Model.Joiner, &Model.Tokens })
+	{
+		FInoDownloadRequest& Request = OutRequests.AddDefaulted_GetRef();
+		Request.Url = File->Url;
+		Request.SaveDirectory = SaveDir;
+		Request.FileName = UInoSherpaSettings::ResolveFileName(*File);
+		Request.ExpectedSha256 = File->ExpectedSha256;
+		Request.ExpectedTotalBytes = File->FileSizeBytes;
+		// bSkipIfCached stays true: present files complete instantly.
+	}
+}
+
+bool ValidateModelSource(const FInoSherpaTransducerModelSource& Model, const TCHAR* Label, FString& OutError)
+{
+	if (Model.ModelDirName.IsEmpty())
+	{
+		OutError = FString::Printf(TEXT("%s: ModelDirName is empty (Project Settings -> Plugins -> InoSherpa)"), Label);
+		return false;
+	}
+	const TCHAR* SlotNames[] = { TEXT("Encoder"), TEXT("Decoder"), TEXT("Joiner"), TEXT("Tokens") };
+	const FInoSherpaModelFileSource* Slots[] = { &Model.Encoder, &Model.Decoder, &Model.Joiner, &Model.Tokens };
+	for (int32 i = 0; i < 4; ++i)
+	{
+		// A slot without a URL is fine only if the file was placed manually.
+		if (Slots[i]->Url.IsEmpty() && !FPaths::FileExists(UInoSherpaSettings::ResolveFilePath(Model, *Slots[i])))
+		{
+			OutError = FString::Printf(TEXT("%s: %s has no Url and no file on disk (Project Settings -> Plugins -> InoSherpa)"), Label, SlotNames[i]);
+			return false;
+		}
+	}
+	return true;
+}
+} // namespace
+
 void UInoSTT::Deinitialize()
 {
-	// Worker destructor joins its thread BEFORE the stream dies; only then
+	// Cancel any in-flight settings download first, then tear down: the
+	// worker destructor joins its thread BEFORE the stream dies; only then
 	// may the recognizer go (the stream references it). In-flight offline
 	// transcribes hold their own recognizer copy and die on the weak-this.
+	if (ActiveDownloadToken.IsValid())
+	{
+		ActiveDownloadToken->Cancel();
+		ActiveDownloadToken.Reset();
+	}
 	StreamWorker.Reset();
 	Recognizer.Reset();
 	OfflineRecognizer.Reset();
@@ -454,6 +502,173 @@ void UInoSTT::TranscribeOfflineAsync(const TArray<float>& Samples, int32 SampleR
 			}
 		});
 	});
+}
+
+void UInoSTT::LoadStreamingModelFromSettingsAsync(const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
+	const FInoSTTLoadedDelegate& OnLoaded)
+{
+	check(IsInGameThread());
+
+	if (bIsLoading)
+	{
+		OnLoaded.ExecuteIfBound(false, TEXT("a model load is already in flight"));
+		return;
+	}
+	if (Recognizer.IsValid())
+	{
+		OnLoaded.ExecuteIfBound(false, TEXT("a model is already loaded -- UnloadModel first"));
+		return;
+	}
+
+	const FInoSherpaTransducerModelSource& Model = UInoSherpaSettings::Get()->StreamingSttModel;
+	FString Error;
+	if (!ValidateModelSource(Model, TEXT("StreamingSttModel"), Error))
+	{
+		OnLoaded.ExecuteIfBound(false, Error);
+		return;
+	}
+
+	bIsLoading = true; // covers the download phase; LoadModelAsync re-takes it
+	ActiveDownloadToken = MakeShared<FInoCancellationToken, ESPMode::ThreadSafe>();
+
+	TArray<FInoDownloadRequest> Requests;
+	BuildModelDownloadRequests(Model, Requests);
+	TWeakObjectPtr<UInoSTT> WeakThis(this);
+
+	InoNodes::Download::DownloadFilesAsync(Requests,
+		[WeakThis, OnDownloadProgress](const FInoDownloadProgress& Progress)
+		{
+			if (WeakThis.IsValid())
+			{
+				OnDownloadProgress.ExecuteIfBound(Progress);
+			}
+		},
+		[WeakThis, OnLoaded](const TArray<FInoDownloadResult>& Results)
+		{
+			UInoSTT* Self = WeakThis.Get();
+			if (Self == nullptr)
+			{
+				return;
+			}
+			Self->bIsLoading = false;
+			Self->ActiveDownloadToken.Reset();
+
+			for (const FInoDownloadResult& Result : Results)
+			{
+				if (!Result.bSuccess)
+				{
+					OnLoaded.ExecuteIfBound(false, FString::Printf(TEXT("download failed for %s: %s"), *Result.FileName, *Result.ErrorMessage));
+					return;
+				}
+			}
+			if (Results.Num() != 4)
+			{
+				OnLoaded.ExecuteIfBound(false, TEXT("unexpected download result count"));
+				return;
+			}
+
+			FInoSTTModelConfig Config; // request order: encoder, decoder, joiner, tokens
+			Config.EncoderPath = Results[0].AbsolutePath;
+			Config.DecoderPath = Results[1].AbsolutePath;
+			Config.JoinerPath  = Results[2].AbsolutePath;
+			Config.TokensPath  = Results[3].AbsolutePath;
+			Self->LoadModelAsync(Config, OnLoaded);
+		},
+		ActiveDownloadToken);
+}
+
+void UInoSTT::LoadOfflineModelFromSettingsAsync(const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
+	const FInoSTTLoadedDelegate& OnLoaded)
+{
+	check(IsInGameThread());
+
+	if (bOfflineLoading)
+	{
+		OnLoaded.ExecuteIfBound(false, TEXT("an offline model load is already in flight"));
+		return;
+	}
+	if (OfflineRecognizer.IsValid())
+	{
+		OnLoaded.ExecuteIfBound(false, TEXT("an offline model is already loaded -- UnloadOfflineModel first"));
+		return;
+	}
+
+	const FInoSherpaTransducerModelSource& Model = UInoSherpaSettings::Get()->OfflineSttModel;
+	FString Error;
+	if (!ValidateModelSource(Model, TEXT("OfflineSttModel"), Error))
+	{
+		OnLoaded.ExecuteIfBound(false, Error);
+		return;
+	}
+
+	bOfflineLoading = true;
+	ActiveDownloadToken = MakeShared<FInoCancellationToken, ESPMode::ThreadSafe>();
+
+	TArray<FInoDownloadRequest> Requests;
+	BuildModelDownloadRequests(Model, Requests);
+	TWeakObjectPtr<UInoSTT> WeakThis(this);
+
+	InoNodes::Download::DownloadFilesAsync(Requests,
+		[WeakThis, OnDownloadProgress](const FInoDownloadProgress& Progress)
+		{
+			if (WeakThis.IsValid())
+			{
+				OnDownloadProgress.ExecuteIfBound(Progress);
+			}
+		},
+		[WeakThis, OnLoaded](const TArray<FInoDownloadResult>& Results)
+		{
+			UInoSTT* Self = WeakThis.Get();
+			if (Self == nullptr)
+			{
+				return;
+			}
+			Self->bOfflineLoading = false;
+			Self->ActiveDownloadToken.Reset();
+
+			for (const FInoDownloadResult& Result : Results)
+			{
+				if (!Result.bSuccess)
+				{
+					OnLoaded.ExecuteIfBound(false, FString::Printf(TEXT("download failed for %s: %s"), *Result.FileName, *Result.ErrorMessage));
+					return;
+				}
+			}
+			if (Results.Num() != 4)
+			{
+				OnLoaded.ExecuteIfBound(false, TEXT("unexpected download result count"));
+				return;
+			}
+
+			FInoSTTOfflineModelConfig Config; // NemoTransducer defaults
+			Config.Transducer.EncoderPath = Results[0].AbsolutePath;
+			Config.Transducer.DecoderPath = Results[1].AbsolutePath;
+			Config.Transducer.JoinerPath  = Results[2].AbsolutePath;
+			Config.TokensPath             = Results[3].AbsolutePath;
+			Self->LoadOfflineModelAsync(Config, OnLoaded);
+		},
+		ActiveDownloadToken);
+}
+
+bool UInoSTT::IsStreamingModelDownloaded() const
+{
+	return UInoSherpaSettings::IsModelDownloaded(UInoSherpaSettings::Get()->StreamingSttModel);
+}
+
+bool UInoSTT::IsOfflineModelDownloaded() const
+{
+	return UInoSherpaSettings::IsModelDownloaded(UInoSherpaSettings::Get()->OfflineSttModel);
+}
+
+void UInoSTT::CancelModelDownload()
+{
+	check(IsInGameThread());
+
+	if (ActiveDownloadToken.IsValid())
+	{
+		ActiveDownloadToken->Cancel();
+		UE_LOG(LogInoSherpa, Log, TEXT("STT: model download cancel requested"));
+	}
 }
 
 void UInoSTT::NotifyPartialFromWorker(const FString& Text, int32 SessionSerial)

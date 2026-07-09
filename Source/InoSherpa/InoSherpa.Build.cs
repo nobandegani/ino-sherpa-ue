@@ -17,6 +17,8 @@ public class InoSherpa : ModuleRules
 			new string[]
 			{
 				"Core",
+				"DeveloperSettings", // UInoSherpaSettings in Public/
+				"InoNodes",          // model downloader; FInoDownloadProgress in the public delegate
 			}
 			);
 
@@ -25,7 +27,6 @@ public class InoSherpa : ModuleRules
 			{
 				"CoreUObject",
 				"Engine",
-				"DeveloperSettings",
 			}
 			);
 
