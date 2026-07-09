@@ -112,7 +112,7 @@ void RunLoadTest(const TArray<FString>& Args)
 	Config.TokensPath  = Args[3];
 
 	FString Error;
-	if (Stt->LoadModel(Config, Error))
+	if (Stt->LoadStreamingModelFromPaths(Config, Error))
 	{
 		UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: LoadTest PASSED"));
 	}
@@ -144,7 +144,7 @@ void RunTranscribeTest(const TArray<FString>& Args)
 {
 	UInoSTT* Stt = GetStt();
 	if (Stt == nullptr) { return; }
-	if (!Stt->IsModelLoaded())
+	if (!Stt->IsStreamingModelLoaded())
 	{
 		UE_LOG(LogInoSherpa, Error, TEXT("STT.SmokeTest: no model loaded -- run Ino.Sherpa.STT.LoadTest first"));
 		return;
@@ -165,7 +165,7 @@ void RunStreamTest(const TArray<FString>& Args)
 {
 	UInoSTT* Stt = GetStt();
 	if (Stt == nullptr) { return; }
-	if (!Stt->IsModelLoaded())
+	if (!Stt->IsStreamingModelLoaded())
 	{
 		UE_LOG(LogInoSherpa, Error, TEXT("STT.SmokeTest: no model loaded -- run Ino.Sherpa.STT.LoadTest first"));
 		return;
@@ -256,7 +256,7 @@ void RunAbortTest(const TArray<FString>& Args)
 {
 	UInoSTT* Stt = GetStt();
 	if (Stt == nullptr) { return; }
-	if (!Stt->IsModelLoaded())
+	if (!Stt->IsStreamingModelLoaded())
 	{
 		UE_LOG(LogInoSherpa, Error, TEXT("STT.SmokeTest: no model loaded -- run Ino.Sherpa.STT.LoadTest first"));
 		return;
@@ -344,7 +344,7 @@ void RunOfflineLoadTest(const TArray<FString>& Args)
 	Config.TokensPath             = Args[3];
 
 	FString Error;
-	if (Stt->LoadOfflineModel(Config, Error))
+	if (Stt->LoadOfflineModelFromPaths(Config, Error))
 	{
 		UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: OfflineLoadTest PASSED"));
 	}
@@ -428,12 +428,12 @@ void RunSettingsLoadTest(const TArray<FString>& Args)
 	if (Which == TEXT("offline"))
 	{
 		UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: SettingsLoadTest offline (downloaded=%d)"), Stt->IsOfflineModelDownloaded() ? 1 : 0);
-		Stt->LoadOfflineModelFromSettingsAsync(OnProgress, OnLoaded);
+		Stt->LoadOfflineModelAsync(OnProgress, OnLoaded);
 	}
 	else
 	{
 		UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: SettingsLoadTest streaming (downloaded=%d)"), Stt->IsStreamingModelDownloaded() ? 1 : 0);
-		Stt->LoadStreamingModelFromSettingsAsync(OnProgress, OnLoaded);
+		Stt->LoadStreamingModelAsync(OnProgress, OnLoaded);
 	}
 }
 

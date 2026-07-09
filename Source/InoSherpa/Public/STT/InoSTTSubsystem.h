@@ -47,22 +47,52 @@ public:
 	//~ UGameInstanceSubsystem
 	virtual void Deinitialize() override;
 
-	// ---- Model lifecycle -------------------------------------------------
+	// ---- Model lifecycle ---------------------------------------------------
+	// Everything is driven by Project Settings -> Plugins -> InoSherpa:
+	// the download sources (URLs, sizes, optional SHA-256) AND the runtime
+	// options per model. Loading downloads whatever is missing (InoNodes:
+	// cached-skip, resume, retries) and then loads -- already-downloaded
+	// models skip straight to the load. OnDownloadProgress fires per tick
+	// on the game thread; OnLoaded fires exactly once.
 
-	/** Loads a model on a worker thread; OnLoaded fires on the game thread. */
-	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT", meta = (AutoCreateRefTerm = "OnLoaded"))
-	void LoadModelAsync(const FInoSTTModelConfig& Config, const FInoSTTLoadedDelegate& OnLoaded);
+	/** Streaming model (Zipformer -- live partials). */
+	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT", meta = (AutoCreateRefTerm = "OnDownloadProgress,OnLoaded"))
+	void LoadStreamingModelAsync(const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
+		const FInoSTTLoadedDelegate& OnLoaded);
 
-	/** Synchronous load; blocks the game thread (tooling / smoke tests). */
+	/** Offline model (Parakeet -- whole-utterance, higher accuracy). */
+	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT", meta = (AutoCreateRefTerm = "OnDownloadProgress,OnLoaded"))
+	void LoadOfflineModelAsync(const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
+		const FInoSTTLoadedDelegate& OnLoaded);
+
+	/** Stops any streaming session and drops the streaming model. */
 	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT")
-	bool LoadModel(const FInoSTTModelConfig& Config, FString& OutError);
+	void UnloadStreamingModel();
 
-	/** Stops any streaming session and drops the model. */
 	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT")
-	void UnloadModel();
+	void UnloadOfflineModel();
 
 	UFUNCTION(BlueprintPure, Category = "InoSherpa|STT")
-	bool IsModelLoaded() const;
+	bool IsStreamingModelLoaded() const;
+
+	UFUNCTION(BlueprintPure, Category = "InoSherpa|STT")
+	bool IsOfflineModelLoaded() const;
+
+	/** Cheap file-stat probes (no hashing) -- safe to poll from UMG. */
+	UFUNCTION(BlueprintPure, Category = "InoSherpa|STT")
+	bool IsStreamingModelDownloaded() const;
+
+	UFUNCTION(BlueprintPure, Category = "InoSherpa|STT")
+	bool IsOfflineModelDownloaded() const;
+
+	/** Cancels an in-flight model download (OnLoaded fires with failure). */
+	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT")
+	void CancelModelDownload();
+
+	// C++-only path-based loaders (smoke tests / advanced callers pointing
+	// at models outside the settings-driven download dir). Synchronous.
+	bool LoadStreamingModelFromPaths(const FInoSTTModelConfig& Config, FString& OutError);
+	bool LoadOfflineModelFromPaths(const FInoSTTOfflineModelConfig& Config, FString& OutError);
 
 	// ---- Streaming session (push-only) ------------------------------------
 
@@ -115,25 +145,10 @@ public:
 	void TranscribeAsync(const TArray<float>& Samples, int32 SampleRate,
 		const FInoSTTFinalDelegate& OnComplete);
 
-	// ---- Offline (non-streaming) model: higher accuracy, whole clips ------
-	// A SECOND, independent model (e.g. Parakeet-TDT) that can be loaded
-	// alongside the streaming one. Offline transcribes may run while a
-	// streaming session is live (separate inference sessions); they only
-	// serialize against each other.
-
-	/** Loads the offline model on a worker thread (a few seconds for 0.6B). */
-	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT", meta = (AutoCreateRefTerm = "OnLoaded"))
-	void LoadOfflineModelAsync(const FInoSTTOfflineModelConfig& Config, const FInoSTTLoadedDelegate& OnLoaded);
-
-	/** Synchronous offline-model load; blocks the game thread (tooling). */
-	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT")
-	bool LoadOfflineModel(const FInoSTTOfflineModelConfig& Config, FString& OutError);
-
-	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT")
-	void UnloadOfflineModel();
-
-	UFUNCTION(BlueprintPure, Category = "InoSherpa|STT")
-	bool IsOfflineModelLoaded() const;
+	// ---- Offline (non-streaming) one-shots: higher accuracy, whole clips --
+	// The offline model is independent of the streaming one: offline
+	// transcribes may run while a streaming session is live (separate
+	// inference sessions); they only serialize against each other.
 
 	/** Synchronous offline one-shot; blocks the game thread. Any sample rate. */
 	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT")
@@ -148,33 +163,6 @@ public:
 	void TranscribeOfflineAsync(const TArray<float>& Samples, int32 SampleRate,
 		const FInoSTTFinalDelegate& OnComplete);
 
-	// ---- Settings-driven download + load -----------------------------------
-	// Model sources live in Project Settings -> Plugins -> InoSherpa. These
-	// download whatever is missing (InoNodes: cached-skip, resume, retries,
-	// optional SHA-256) and then load the model. OnDownloadProgress fires per
-	// tick on the game thread (OverallProgressPercent spans all files);
-	// OnLoaded fires exactly once. Already-downloaded models skip straight
-	// to the load.
-
-	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT", meta = (AutoCreateRefTerm = "OnDownloadProgress,OnLoaded"))
-	void LoadStreamingModelFromSettingsAsync(const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
-		const FInoSTTLoadedDelegate& OnLoaded);
-
-	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT", meta = (AutoCreateRefTerm = "OnDownloadProgress,OnLoaded"))
-	void LoadOfflineModelFromSettingsAsync(const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
-		const FInoSTTLoadedDelegate& OnLoaded);
-
-	/** Cheap file-stat probe (no hashing) -- safe to poll from UMG. */
-	UFUNCTION(BlueprintPure, Category = "InoSherpa|STT")
-	bool IsStreamingModelDownloaded() const;
-
-	UFUNCTION(BlueprintPure, Category = "InoSherpa|STT")
-	bool IsOfflineModelDownloaded() const;
-
-	/** Cancels an in-flight settings-driven download (OnLoaded fires with failure). */
-	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT")
-	void CancelModelDownload();
-
 	// ---- Worker -> game-thread notifications (internal; do not call) ------
 	// SessionSerial guards against events queued by a previous session
 	// arriving after a same-frame StopStream -> StartStream.
@@ -185,6 +173,9 @@ public:
 	void NotifyWorkerDiedFromWorker(int32 SessionSerial);
 
 private:
+	/** Async load internals shared by the settings-driven entry points. */
+	void LoadStreamingFromConfigAsync(const FInoSTTModelConfig& Config, const FInoSTTLoadedDelegate& OnLoaded);
+	void LoadOfflineFromConfigAsync(const FInoSTTOfflineModelConfig& Config, const FInoSTTLoadedDelegate& OnLoaded);
 	/** Owns the sherpa recognizer; shared so workers outlive UnloadModel. */
 	TSharedPtr<FInoSttRecognizer, ESPMode::ThreadSafe> Recognizer;
 

@@ -73,7 +73,7 @@ void UInoSTT::Deinitialize()
 	Super::Deinitialize();
 }
 
-void UInoSTT::LoadModelAsync(const FInoSTTModelConfig& Config, const FInoSTTLoadedDelegate& OnLoaded)
+void UInoSTT::LoadStreamingFromConfigAsync(const FInoSTTModelConfig& Config, const FInoSTTLoadedDelegate& OnLoaded)
 {
 	check(IsInGameThread());
 
@@ -117,7 +117,7 @@ void UInoSTT::LoadModelAsync(const FInoSTTModelConfig& Config, const FInoSTTLoad
 	});
 }
 
-bool UInoSTT::LoadModel(const FInoSTTModelConfig& Config, FString& OutError)
+bool UInoSTT::LoadStreamingModelFromPaths(const FInoSTTModelConfig& Config, FString& OutError)
 {
 	check(IsInGameThread());
 
@@ -136,7 +136,7 @@ bool UInoSTT::LoadModel(const FInoSTTModelConfig& Config, FString& OutError)
 	return Recognizer.IsValid();
 }
 
-void UInoSTT::UnloadModel()
+void UInoSTT::UnloadStreamingModel()
 {
 	check(IsInGameThread());
 
@@ -144,7 +144,7 @@ void UInoSTT::UnloadModel()
 	Recognizer.Reset();
 }
 
-bool UInoSTT::IsModelLoaded() const
+bool UInoSTT::IsStreamingModelLoaded() const
 {
 	return Recognizer.IsValid();
 }
@@ -345,7 +345,7 @@ void UInoSTT::TranscribeAsync(const TArray<float>& Samples, int32 SampleRate,
 	});
 }
 
-void UInoSTT::LoadOfflineModelAsync(const FInoSTTOfflineModelConfig& Config, const FInoSTTLoadedDelegate& OnLoaded)
+void UInoSTT::LoadOfflineFromConfigAsync(const FInoSTTOfflineModelConfig& Config, const FInoSTTLoadedDelegate& OnLoaded)
 {
 	check(IsInGameThread());
 
@@ -389,7 +389,7 @@ void UInoSTT::LoadOfflineModelAsync(const FInoSTTOfflineModelConfig& Config, con
 	});
 }
 
-bool UInoSTT::LoadOfflineModel(const FInoSTTOfflineModelConfig& Config, FString& OutError)
+bool UInoSTT::LoadOfflineModelFromPaths(const FInoSTTOfflineModelConfig& Config, FString& OutError)
 {
 	check(IsInGameThread());
 
@@ -504,7 +504,7 @@ void UInoSTT::TranscribeOfflineAsync(const TArray<float>& Samples, int32 SampleR
 	});
 }
 
-void UInoSTT::LoadStreamingModelFromSettingsAsync(const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
+void UInoSTT::LoadStreamingModelAsync(const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
 	const FInoSTTLoadedDelegate& OnLoaded)
 {
 	check(IsInGameThread());
@@ -572,12 +572,25 @@ void UInoSTT::LoadStreamingModelFromSettingsAsync(const FInoSTTDownloadProgressD
 			Config.DecoderPath = Results[1].AbsolutePath;
 			Config.JoinerPath  = Results[2].AbsolutePath;
 			Config.TokensPath  = Results[3].AbsolutePath;
-			Self->LoadModelAsync(Config, OnLoaded);
+
+			const FInoSTTStreamingModelOptions& Options = UInoSherpaSettings::Get()->StreamingSttOptions;
+			Config.NumThreads              = Options.NumThreads;
+			Config.bDebug                  = Options.bDebug;
+			Config.SampleRate              = Options.SampleRate;
+			Config.FeatureDim              = Options.FeatureDim;
+			Config.DecodingMethod          = Options.DecodingMethod;
+			Config.MaxActivePaths          = Options.MaxActivePaths;
+			Config.bEnableEndpoint         = Options.bEnableEndpoint;
+			Config.Rule1MinTrailingSilence = Options.Rule1MinTrailingSilence;
+			Config.Rule2MinTrailingSilence = Options.Rule2MinTrailingSilence;
+			Config.Rule3MinUtteranceLength = Options.Rule3MinUtteranceLength;
+
+			Self->LoadStreamingFromConfigAsync(Config, OnLoaded);
 		},
 		ActiveDownloadToken);
 }
 
-void UInoSTT::LoadOfflineModelFromSettingsAsync(const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
+void UInoSTT::LoadOfflineModelAsync(const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
 	const FInoSTTLoadedDelegate& OnLoaded)
 {
 	check(IsInGameThread());
@@ -645,7 +658,16 @@ void UInoSTT::LoadOfflineModelFromSettingsAsync(const FInoSTTDownloadProgressDel
 			Config.Transducer.DecoderPath = Results[1].AbsolutePath;
 			Config.Transducer.JoinerPath  = Results[2].AbsolutePath;
 			Config.TokensPath             = Results[3].AbsolutePath;
-			Self->LoadOfflineModelAsync(Config, OnLoaded);
+
+			const FInoSTTOfflineModelOptions& Options = UInoSherpaSettings::Get()->OfflineSttOptions;
+			Config.NumThreads     = Options.NumThreads;
+			Config.bDebug         = Options.bDebug;
+			Config.SampleRate     = Options.SampleRate;
+			Config.FeatureDim     = Options.FeatureDim;
+			Config.DecodingMethod = Options.DecodingMethod;
+			Config.MaxActivePaths = Options.MaxActivePaths;
+
+			Self->LoadOfflineFromConfigAsync(Config, OnLoaded);
 		},
 		ActiveDownloadToken);
 }

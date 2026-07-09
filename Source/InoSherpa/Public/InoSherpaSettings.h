@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
+#include "STT/InoSTTTypes.h"
 
 #include "InoSherpaSettings.generated.h"
 
@@ -78,12 +79,13 @@ struct INOSHERPA_API FInoSherpaTransducerModelSource
 /**
  * Project Settings -> Plugins -> InoSherpa.
  *
- * Model download sources for the two STT models. UInoSTT's
- * LoadStreamingModelFromSettingsAsync / LoadOfflineModelFromSettingsAsync
- * download whatever is missing (via the InoNodes downloader: resume,
- * retries, SHA-256, cancel) and then load the model. Defaults point at the
- * public Hugging Face mirrors of the sherpa-onnx reference models --
- * override with your own CDN for shipping.
+ * The single source of truth for the two STT models: download sources
+ * AND runtime options. UInoSTT::LoadStreamingModelAsync /
+ * LoadOfflineModelAsync download whatever is missing (via the InoNodes
+ * downloader: resume, retries, SHA-256, cancel) and then load the model
+ * with the options configured here. Defaults point at the public Hugging
+ * Face mirrors of the sherpa-onnx reference models -- override with your
+ * own CDN for shipping.
  *
  * TTS (Piper) is not settings-driven yet: Piper bundles include the
  * espeak-ng-data DIRECTORY (hundreds of small files), which doesn't fit
@@ -103,9 +105,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "STT Streaming Model (Zipformer)")
 	FInoSherpaTransducerModelSource StreamingSttModel;
 
+	/** Runtime knobs for the streaming model (threads, endpoint rules, ...). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "STT Streaming Model (Zipformer)")
+	FInoSTTStreamingModelOptions StreamingSttOptions;
+
 	/** Offline STT (whole-utterance, higher accuracy) -- Parakeet-TDT. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "STT Offline Model (Parakeet)")
 	FInoSherpaTransducerModelSource OfflineSttModel;
+
+	/** Runtime knobs for the offline model. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "STT Offline Model (Parakeet)")
+	FInoSTTOfflineModelOptions OfflineSttOptions;
 
 	// ---- C++ helpers -------------------------------------------------------
 
