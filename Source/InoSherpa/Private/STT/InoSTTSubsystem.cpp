@@ -504,7 +504,8 @@ void UInoSTT::TranscribeOfflineAsync(const TArray<float>& Samples, int32 SampleR
 	});
 }
 
-void UInoSTT::LoadStreamingModelAsync(const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
+void UInoSTT::LoadStreamingModelAsync(const FInoSTTStreamingModelOptions& Options,
+	const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
 	const FInoSTTLoadedDelegate& OnLoaded)
 {
 	check(IsInGameThread());
@@ -543,7 +544,7 @@ void UInoSTT::LoadStreamingModelAsync(const FInoSTTDownloadProgressDelegate& OnD
 				OnDownloadProgress.ExecuteIfBound(Progress);
 			}
 		},
-		[WeakThis, OnLoaded](const TArray<FInoDownloadResult>& Results)
+		[WeakThis, Options, OnLoaded](const TArray<FInoDownloadResult>& Results)
 		{
 			UInoSTT* Self = WeakThis.Get();
 			if (Self == nullptr)
@@ -573,7 +574,6 @@ void UInoSTT::LoadStreamingModelAsync(const FInoSTTDownloadProgressDelegate& OnD
 			Config.JoinerPath  = Results[2].AbsolutePath;
 			Config.TokensPath  = Results[3].AbsolutePath;
 
-			const FInoSTTStreamingModelOptions& Options = UInoSherpaSettings::Get()->StreamingSttOptions;
 			Config.NumThreads              = Options.NumThreads;
 			Config.bDebug                  = Options.bDebug;
 			Config.SampleRate              = Options.SampleRate;
@@ -590,7 +590,8 @@ void UInoSTT::LoadStreamingModelAsync(const FInoSTTDownloadProgressDelegate& OnD
 		ActiveDownloadToken);
 }
 
-void UInoSTT::LoadOfflineModelAsync(const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
+void UInoSTT::LoadOfflineModelAsync(const FInoSTTOfflineModelOptions& Options,
+	const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
 	const FInoSTTLoadedDelegate& OnLoaded)
 {
 	check(IsInGameThread());
@@ -629,7 +630,7 @@ void UInoSTT::LoadOfflineModelAsync(const FInoSTTDownloadProgressDelegate& OnDow
 				OnDownloadProgress.ExecuteIfBound(Progress);
 			}
 		},
-		[WeakThis, OnLoaded](const TArray<FInoDownloadResult>& Results)
+		[WeakThis, Options, OnLoaded](const TArray<FInoDownloadResult>& Results)
 		{
 			UInoSTT* Self = WeakThis.Get();
 			if (Self == nullptr)
@@ -659,7 +660,6 @@ void UInoSTT::LoadOfflineModelAsync(const FInoSTTDownloadProgressDelegate& OnDow
 			Config.Transducer.JoinerPath  = Results[2].AbsolutePath;
 			Config.TokensPath             = Results[3].AbsolutePath;
 
-			const FInoSTTOfflineModelOptions& Options = UInoSherpaSettings::Get()->OfflineSttOptions;
 			Config.NumThreads     = Options.NumThreads;
 			Config.bDebug         = Options.bDebug;
 			Config.SampleRate     = Options.SampleRate;

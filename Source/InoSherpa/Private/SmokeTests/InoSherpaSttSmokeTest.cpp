@@ -428,12 +428,12 @@ void RunSettingsLoadTest(const TArray<FString>& Args)
 	if (Which == TEXT("offline"))
 	{
 		UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: SettingsLoadTest offline (downloaded=%d)"), Stt->IsOfflineModelDownloaded() ? 1 : 0);
-		Stt->LoadOfflineModelAsync(OnProgress, OnLoaded);
+		Stt->LoadOfflineModelAsync(FInoSTTOfflineModelOptions(), OnProgress, OnLoaded);
 	}
 	else
 	{
 		UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: SettingsLoadTest streaming (downloaded=%d)"), Stt->IsStreamingModelDownloaded() ? 1 : 0);
-		Stt->LoadStreamingModelAsync(OnProgress, OnLoaded);
+		Stt->LoadStreamingModelAsync(FInoSTTStreamingModelOptions(), OnProgress, OnLoaded);
 	}
 }
 

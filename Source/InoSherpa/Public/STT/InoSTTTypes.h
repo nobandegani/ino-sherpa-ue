@@ -229,72 +229,72 @@ struct INOSHERPA_API FInoSTTOfflineModelConfig
 };
 
 /**
- * Runtime options for the STREAMING model, edited in Project Settings ->
- * Plugins -> InoSherpa (paths come from the model source there; these are
- * the non-path knobs).
+ * Runtime options for the STREAMING model -- an input on
+ * UInoSTT::LoadStreamingModelAsync (defaults are right for the published
+ * Zipformer models; paths/URLs live in Project Settings).
  */
 USTRUCT(BlueprintType)
 struct INOSHERPA_API FInoSTTStreamingModelOptions
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "InoSherpa|STT")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
 	int32 NumThreads = 1;
 
 	/** Verbose sherpa-side logging of the model load. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "InoSherpa|STT")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
 	bool bDebug = false;
 
 	/** Model feature rate/dim; 16000/80 for the published models. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "InoSherpa|STT")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
 	int32 SampleRate = 16000;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "InoSherpa|STT")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
 	int32 FeatureDim = 80;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "InoSherpa|STT")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
 	FString DecodingMethod = TEXT("greedy_search");
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "InoSherpa|STT")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
 	int32 MaxActivePaths = 4;
 
 	/** Endpoint detection (auto utterance segmentation on pauses). */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "InoSherpa|STT")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
 	bool bEnableEndpoint = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "InoSherpa|STT")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
 	float Rule1MinTrailingSilence = 2.4f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "InoSherpa|STT")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
 	float Rule2MinTrailingSilence = 1.2f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "InoSherpa|STT")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
 	float Rule3MinUtteranceLength = 20.0f;
 };
 
-/** Runtime options for the OFFLINE model (Project Settings, non-path knobs). */
+/** Runtime options for the OFFLINE model -- input on UInoSTT::LoadOfflineModelAsync. */
 USTRUCT(BlueprintType)
 struct INOSHERPA_API FInoSTTOfflineModelOptions
 {
 	GENERATED_BODY()
 
 	/** 2 is a good default for 0.6B-class models on desktop CPUs. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "InoSherpa|STT")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
 	int32 NumThreads = 2;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "InoSherpa|STT")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
 	bool bDebug = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "InoSherpa|STT")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
 	int32 SampleRate = 16000;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "InoSherpa|STT")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
 	int32 FeatureDim = 80;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "InoSherpa|STT")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
 	FString DecodingMethod = TEXT("greedy_search");
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Config, Category = "InoSherpa|STT")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
 	int32 MaxActivePaths = 4;
 };
 

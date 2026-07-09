@@ -48,21 +48,24 @@ public:
 	virtual void Deinitialize() override;
 
 	// ---- Model lifecycle ---------------------------------------------------
-	// Everything is driven by Project Settings -> Plugins -> InoSherpa:
-	// the download sources (URLs, sizes, optional SHA-256) AND the runtime
-	// options per model. Loading downloads whatever is missing (InoNodes:
-	// cached-skip, resume, retries) and then loads -- already-downloaded
-	// models skip straight to the load. OnDownloadProgress fires per tick
-	// on the game thread; OnLoaded fires exactly once.
+	// WHERE the models come from (URLs, sizes, optional SHA-256) lives in
+	// Project Settings -> Plugins -> InoSherpa; the runtime Options are node
+	// inputs (defaults are right for the reference models). Loading
+	// downloads whatever is missing (InoNodes: cached-skip, resume, retries)
+	// and then loads -- already-downloaded models skip straight to the load.
+	// OnDownloadProgress fires per tick on the game thread; OnLoaded fires
+	// exactly once.
 
 	/** Streaming model (Zipformer -- live partials). */
-	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT", meta = (AutoCreateRefTerm = "OnDownloadProgress,OnLoaded"))
-	void LoadStreamingModelAsync(const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
+	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT", meta = (AutoCreateRefTerm = "Options,OnDownloadProgress,OnLoaded"))
+	void LoadStreamingModelAsync(const FInoSTTStreamingModelOptions& Options,
+		const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
 		const FInoSTTLoadedDelegate& OnLoaded);
 
 	/** Offline model (Parakeet -- whole-utterance, higher accuracy). */
-	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT", meta = (AutoCreateRefTerm = "OnDownloadProgress,OnLoaded"))
-	void LoadOfflineModelAsync(const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
+	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT", meta = (AutoCreateRefTerm = "Options,OnDownloadProgress,OnLoaded"))
+	void LoadOfflineModelAsync(const FInoSTTOfflineModelOptions& Options,
+		const FInoSTTDownloadProgressDelegate& OnDownloadProgress,
 		const FInoSTTLoadedDelegate& OnLoaded);
 
 	/** Stops any streaming session and drops the streaming model. */

@@ -125,12 +125,17 @@ source is FOUR file slots (Encoder/Decoder/Joiner/Tokens), each with
 Hugging Face mirrors (int8 variants; ~70 MB Zipformer, ~630 MB
 Parakeet) — override with your own CDN for shipping.
 
-`UInoSTT::LoadStreamingModelFromSettingsAsync` /
-`LoadOfflineModelFromSettingsAsync` download whatever is missing via the
-**InoNodes** downloader (cached-skip, resume, retries, optional SHA-256,
-`OnDownloadProgress` per tick with batch-wide `OverallProgressPercent`)
-into `<ProjectPersistentDownloadDir>/InoSherpa/<ModelDirName>/`, then
-chain into the existing load path. `IsStreamingModelDownloaded()` /
+`UInoSTT::LoadStreamingModelAsync(Options, OnDownloadProgress, OnLoaded)`
+/ `LoadOfflineModelAsync(...)` are the ONLY Blueprint loaders: they
+download whatever is missing via the **InoNodes** downloader
+(cached-skip, resume, retries, optional SHA-256, `OnDownloadProgress`
+per tick with batch-wide `OverallProgressPercent`) into
+`<ProjectPersistentDownloadDir>/InoSherpa/<ModelDirName>/`, then load.
+Runtime knobs (`FInoSTTStreamingModelOptions` with threads + endpoint
+rules; `FInoSTTOfflineModelOptions`) are NODE INPUTS with correct
+defaults — paths never appear in Blueprint. Path-based loading survives
+C++-only as `LoadStreamingModelFromPaths` / `LoadOfflineModelFromPaths`
+(smoke tests / advanced). `IsStreamingModelDownloaded()` /
 `IsOfflineModelDownloaded()` are stat-probes (UMG-safe);
 `CancelModelDownload()` aborts mid-download; `Deinitialize` cancels
 automatically. This mirrors the InoAgents Gemma flow
