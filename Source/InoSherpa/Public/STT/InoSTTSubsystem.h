@@ -8,6 +8,7 @@
 
 #include "InoSTTSubsystem.generated.h"
 
+class FInoSttOfflineRecognizer;
 class FInoSttRecognizer;
 class FInoSttStreamWorker;
 
@@ -113,6 +114,39 @@ public:
 	void TranscribeAsync(const TArray<float>& Samples, int32 SampleRate,
 		const FInoSTTFinalDelegate& OnComplete);
 
+	// ---- Offline (non-streaming) model: higher accuracy, whole clips ------
+	// A SECOND, independent model (e.g. Parakeet-TDT) that can be loaded
+	// alongside the streaming one. Offline transcribes may run while a
+	// streaming session is live (separate inference sessions); they only
+	// serialize against each other.
+
+	/** Loads the offline model on a worker thread (a few seconds for 0.6B). */
+	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT", meta = (AutoCreateRefTerm = "OnLoaded"))
+	void LoadOfflineModelAsync(const FInoSTTOfflineModelConfig& Config, const FInoSTTLoadedDelegate& OnLoaded);
+
+	/** Synchronous offline-model load; blocks the game thread (tooling). */
+	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT")
+	bool LoadOfflineModel(const FInoSTTOfflineModelConfig& Config, FString& OutError);
+
+	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT")
+	void UnloadOfflineModel();
+
+	UFUNCTION(BlueprintPure, Category = "InoSherpa|STT")
+	bool IsOfflineModelLoaded() const;
+
+	/** Synchronous offline one-shot; blocks the game thread. Any sample rate. */
+	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT")
+	FInoSTTResult TranscribeOfflineInt16(const TArray<uint8>& Int16PcmLE, int32 SampleRate);
+
+	/** Synchronous offline one-shot; blocks the game thread. Any sample rate. */
+	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT")
+	FInoSTTResult TranscribeOfflineFloat(const TArray<float>& Samples, int32 SampleRate);
+
+	/** Async offline one-shot; OnComplete fires on the game thread. */
+	UFUNCTION(BlueprintCallable, Category = "InoSherpa|STT", meta = (AutoCreateRefTerm = "OnComplete"))
+	void TranscribeOfflineAsync(const TArray<float>& Samples, int32 SampleRate,
+		const FInoSTTFinalDelegate& OnComplete);
+
 	// ---- Worker -> game-thread notifications (internal; do not call) ------
 	// SessionSerial guards against events queued by a previous session
 	// arriving after a same-frame StopStream -> StartStream.
@@ -125,6 +159,9 @@ public:
 private:
 	/** Owns the sherpa recognizer; shared so workers outlive UnloadModel. */
 	TSharedPtr<FInoSttRecognizer, ESPMode::ThreadSafe> Recognizer;
+
+	/** The offline (non-streaming) recognizer; independent of the above. */
+	TSharedPtr<FInoSttOfflineRecognizer, ESPMode::ThreadSafe> OfflineRecognizer;
 
 	/** Owns the sherpa stream + its dedicated thread (TSharedPtr so the
 	 *  incomplete type is deletable from the generated code). */
@@ -140,4 +177,6 @@ private:
 
 	bool bIsLoading = false;
 	bool bTranscribeInFlight = false;
+	bool bOfflineLoading = false;
+	bool bOfflineTranscribeInFlight = false;
 };

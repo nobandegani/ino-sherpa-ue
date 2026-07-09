@@ -34,7 +34,12 @@ $Models = @(
     @{
         Name  = "sherpa-onnx-streaming-zipformer-en-2023-06-26"
         Url   = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2"
-        Label = "Streaming Zipformer transducer en (STT)"
+        Label = "Streaming Zipformer transducer en (STT, streaming)"
+    },
+    @{
+        Name  = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
+        Url   = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2"
+        Label = "NVIDIA Parakeet-TDT 0.6B v2 int8 (STT, offline / high accuracy, ~460 MB)"
     }
 )
 

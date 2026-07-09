@@ -13,9 +13,16 @@ Blueprint-callable game-instance subsystems**:
 - **`UInoTTS`** — on-device text-to-speech (Piper/VITS shipping; Kokoro
   config plumbed, wiring next). Sync, async, and streaming (per-sentence
   audio chunks) APIs, mid-generation cancellation.
-- **`UInoSTT`** — on-device speech-to-text (streaming Zipformer
-  transducer). Push-only audio input, live partial results, endpoint
-  auto-segmentation, plus sync/async whole-clip one-shots.
+- **`UInoSTT`** — on-device speech-to-text. TWO independent models can
+  be loaded side by side:
+  - *Streaming* (Zipformer transducer): push-only audio input, live
+    partial results, endpoint auto-segmentation.
+  - *Offline* (NeMo transducer / **Parakeet-TDT** tested; Whisper,
+    SenseVoice, Moonshine configs plumbed): whole-clip
+    `TranscribeOffline*` one-shots — noticeably higher accuracy with
+    punctuation + casing, RTF ~0.04 on CPU. Offline one-shots may run
+    while a streaming session is live (separate inference sessions) but
+    serialize among themselves.
 
 Upstream: https://github.com/k2-fsa/sherpa-onnx — it also offers VAD,
 speaker ID/diarization, keyword spotting, etc., which can slot into this
@@ -70,7 +77,8 @@ One module, two subsystems, three module-private native classes:
 | `UInoTTS` (`Public/TTS/InoTTSSubsystem.h`) | `UGameInstanceSubsystem` | TTS API surface; Pattern-A threading |
 | `UInoSTT` (`Public/STT/InoSTTSubsystem.h`) | `UGameInstanceSubsystem` | STT API surface; owns the stream worker |
 | `FInoTtsEngine` (`Private/TTS/`) | plain C++, `TSharedPtr` | owns `SherpaOnnxOfflineTts`; blocking `Generate` with cancel/chunk trampoline |
-| `FInoSttRecognizer` (`Private/STT/`) | plain C++, `TSharedPtr` | owns `SherpaOnnxOnlineRecognizer`; `TranscribeOnce` for one-shots |
+| `FInoSttRecognizer` (`Private/STT/`) | plain C++, `TSharedPtr` | owns `SherpaOnnxOnlineRecognizer`; `TranscribeOnce` for streaming-model one-shots |
+| `FInoSttOfflineRecognizer` (`Private/STT/`) | plain C++, `TSharedPtr` | owns `SherpaOnnxOfflineRecognizer` (Parakeet et al); `Transcribe` whole clips — no tail padding needed (full-context decode) |
 | `FInoSttStreamWorker` (`Private/STT/`) | `FRunnable` | exclusively owns one `SherpaOnnxOnlineStream` + its thread |
 
 Threading (copied from the InoAgents house patterns — see
@@ -194,7 +202,11 @@ only):
 | `Ino.Sherpa.TTS.CancelTest [text...]` | mid-generation cancel → partial audio + `bWasCancelled` |
 | `Ino.Sherpa.STT.LoadTest <enc> <dec> <joiner> <tokens>` | sync Zipformer load |
 | `Ino.Sherpa.STT.TranscribeTest <mono.wav>` | sync one-shot; text matches `test_wavs/trans.txt` |
-| `Ino.Sherpa.STT.StreamTest <mono.wav>` | full worker path: paced 100 ms pushes → growing partials → final |
+| `Ino.Sherpa.STT.StreamTest <mono.wav> [passes]` | full worker path: paced 100 ms pushes → growing partials → final; passes ≥ 2 exercises session reuse after FinishStream |
+| `Ino.Sherpa.STT.AbortTest <mono.wav>` | StopStream joining mid-decode, then a fresh session |
+| `Ino.Sherpa.STT.OfflineLoadTest <enc> <dec> <joiner> <tokens>` | sync Parakeet (NeMo transducer) load |
+| `Ino.Sherpa.STT.OfflineTranscribeTest <mono.wav>` | sync offline one-shot (punctuated, cased text) |
+| `Ino.Sherpa.STT.OfflineTranscribeAsyncTest <mono.wav>` | async offline one-shot via delegate |
 
 Headless one-liner used for verification (from a shell):
 

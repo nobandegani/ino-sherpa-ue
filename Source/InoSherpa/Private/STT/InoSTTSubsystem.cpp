@@ -4,6 +4,7 @@
 
 #include "InoSherpa.h"
 #include "InoSherpaPcm.h"
+#include "STT/InoSttOfflineRecognizer.h"
 #include "STT/InoSttRecognizer.h"
 #include "STT/InoSttStreamWorker.h"
 
@@ -12,9 +13,11 @@
 void UInoSTT::Deinitialize()
 {
 	// Worker destructor joins its thread BEFORE the stream dies; only then
-	// may the recognizer go (the stream references it).
+	// may the recognizer go (the stream references it). In-flight offline
+	// transcribes hold their own recognizer copy and die on the weak-this.
 	StreamWorker.Reset();
 	Recognizer.Reset();
+	OfflineRecognizer.Reset();
 	OnPartialDelegate.Unbind();
 	OnFinalDelegate.Unbind();
 	OnEndpointDelegate.Unbind();
@@ -288,6 +291,165 @@ void UInoSTT::TranscribeAsync(const TArray<float>& Samples, int32 SampleRate,
 			if (UInoSTT* Self = WeakThis.Get())
 			{
 				Self->bTranscribeInFlight = false;
+				OnComplete.ExecuteIfBound(Result);
+			}
+		});
+	});
+}
+
+void UInoSTT::LoadOfflineModelAsync(const FInoSTTOfflineModelConfig& Config, const FInoSTTLoadedDelegate& OnLoaded)
+{
+	check(IsInGameThread());
+
+	if (bOfflineLoading)
+	{
+		OnLoaded.ExecuteIfBound(false, TEXT("an offline model load is already in flight"));
+		return;
+	}
+	if (OfflineRecognizer.IsValid())
+	{
+		OnLoaded.ExecuteIfBound(false, TEXT("an offline model is already loaded -- UnloadOfflineModel first"));
+		return;
+	}
+
+	bOfflineLoading = true;
+	TWeakObjectPtr<UInoSTT> WeakThis(this);
+
+	Async(EAsyncExecution::ThreadPool, [WeakThis, Config, OnLoaded]()
+	{
+		FString Error;
+		TSharedPtr<FInoSttOfflineRecognizer, ESPMode::ThreadSafe> NewRecognizer = FInoSttOfflineRecognizer::Create(Config, Error);
+
+		AsyncTask(ENamedThreads::GameThread, [WeakThis, NewRecognizer, Error, OnLoaded]()
+		{
+			UInoSTT* Self = WeakThis.Get();
+			if (Self == nullptr)
+			{
+				return;
+			}
+			Self->bOfflineLoading = false;
+			if (NewRecognizer.IsValid())
+			{
+				Self->OfflineRecognizer = NewRecognizer;
+				OnLoaded.ExecuteIfBound(true, FString());
+			}
+			else
+			{
+				OnLoaded.ExecuteIfBound(false, Error);
+			}
+		});
+	});
+}
+
+bool UInoSTT::LoadOfflineModel(const FInoSTTOfflineModelConfig& Config, FString& OutError)
+{
+	check(IsInGameThread());
+
+	if (bOfflineLoading)
+	{
+		OutError = TEXT("an offline model load is already in flight");
+		return false;
+	}
+	if (OfflineRecognizer.IsValid())
+	{
+		OutError = TEXT("an offline model is already loaded -- UnloadOfflineModel first");
+		return false;
+	}
+
+	OfflineRecognizer = FInoSttOfflineRecognizer::Create(Config, OutError);
+	return OfflineRecognizer.IsValid();
+}
+
+void UInoSTT::UnloadOfflineModel()
+{
+	check(IsInGameThread());
+
+	OfflineRecognizer.Reset(); // in-flight async transcribes hold their own copy
+}
+
+bool UInoSTT::IsOfflineModelLoaded() const
+{
+	return OfflineRecognizer.IsValid();
+}
+
+FInoSTTResult UInoSTT::TranscribeOfflineInt16(const TArray<uint8>& Int16PcmLE, int32 SampleRate)
+{
+	check(IsInGameThread());
+
+	FInoSTTResult Result;
+	Result.bIsFinal = true;
+	TArray<float> Samples;
+	FString Error;
+	if (!InoSherpaPcm::Int16PcmBytesToFloat32Mono(Int16PcmLE, Samples, &Error))
+	{
+		UE_LOG(LogInoSherpa, Warning, TEXT("STT: TranscribeOfflineInt16 rejected: %s"), *Error);
+		return Result;
+	}
+	return TranscribeOfflineFloat(Samples, SampleRate);
+}
+
+FInoSTTResult UInoSTT::TranscribeOfflineFloat(const TArray<float>& Samples, int32 SampleRate)
+{
+	check(IsInGameThread());
+
+	FInoSTTResult Result;
+	Result.bIsFinal = true;
+
+	if (!OfflineRecognizer.IsValid())
+	{
+		UE_LOG(LogInoSherpa, Warning, TEXT("STT: TranscribeOffline without a loaded offline model"));
+		return Result;
+	}
+	if (bOfflineTranscribeInFlight)
+	{
+		UE_LOG(LogInoSherpa, Warning, TEXT("STT: TranscribeOffline refused -- an offline transcribe is already in flight"));
+		return Result;
+	}
+
+	Result.Text = OfflineRecognizer->Transcribe(Samples, SampleRate);
+	return Result;
+}
+
+void UInoSTT::TranscribeOfflineAsync(const TArray<float>& Samples, int32 SampleRate,
+	const FInoSTTFinalDelegate& OnComplete)
+{
+	check(IsInGameThread());
+
+	auto FailNow = [&OnComplete](const TCHAR* Why)
+	{
+		UE_LOG(LogInoSherpa, Warning, TEXT("STT: TranscribeOfflineAsync refused -- %s"), Why);
+		FInoSTTResult Failed;
+		Failed.bIsFinal = true;
+		OnComplete.ExecuteIfBound(Failed);
+	};
+
+	if (!OfflineRecognizer.IsValid())
+	{
+		FailNow(TEXT("no offline model loaded"));
+		return;
+	}
+	if (bOfflineTranscribeInFlight)
+	{
+		FailNow(TEXT("an offline transcribe is already in flight"));
+		return;
+	}
+
+	bOfflineTranscribeInFlight = true;
+	TWeakObjectPtr<UInoSTT> WeakThis(this);
+	TSharedPtr<FInoSttOfflineRecognizer, ESPMode::ThreadSafe> RecognizerCopy = OfflineRecognizer;
+	TArray<float> SamplesCopy = Samples;
+
+	Async(EAsyncExecution::ThreadPool, [WeakThis, RecognizerCopy, SamplesCopy = MoveTemp(SamplesCopy), SampleRate, OnComplete]()
+	{
+		FInoSTTResult Result;
+		Result.bIsFinal = true;
+		Result.Text = RecognizerCopy->Transcribe(SamplesCopy, SampleRate);
+
+		AsyncTask(ENamedThreads::GameThread, [WeakThis, OnComplete, Result = MoveTemp(Result)]()
+		{
+			if (UInoSTT* Self = WeakThis.Get())
+			{
+				Self->bOfflineTranscribeInFlight = false;
 				OnComplete.ExecuteIfBound(Result);
 			}
 		});

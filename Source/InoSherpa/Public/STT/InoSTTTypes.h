@@ -82,6 +82,151 @@ struct INOSHERPA_API FInoSTTModelConfig
 	float Rule3MinUtteranceLength = 20.0f;
 };
 
+/** Which offline (non-streaming) model family a FInoSTTOfflineModelConfig describes. */
+UENUM(BlueprintType)
+enum class EInoSTTOfflineModelType : uint8
+{
+	/** NeMo transducer -- NVIDIA Parakeet-TDT (phase-1 tested path). */
+	NemoTransducer UMETA(DisplayName = "NeMo Transducer (Parakeet)"),
+
+	/** OpenAI Whisper (plumbed; untested). */
+	Whisper UMETA(DisplayName = "Whisper"),
+
+	/** SenseVoice zh/en/ja/ko/yue (plumbed; untested). */
+	SenseVoice UMETA(DisplayName = "SenseVoice"),
+
+	/** Moonshine tiny/base English (plumbed; untested). */
+	Moonshine UMETA(DisplayName = "Moonshine"),
+};
+
+/** NeMo/Parakeet transducer model paths (offline). */
+USTRUCT(BlueprintType)
+struct INOSHERPA_API FInoSTTOfflineTransducerConfig
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FString EncoderPath;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FString DecoderPath;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FString JoinerPath;
+};
+
+/** Whisper model paths + options (offline). */
+USTRUCT(BlueprintType)
+struct INOSHERPA_API FInoSTTWhisperConfig
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FString EncoderPath;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FString DecoderPath;
+
+	/** Language hint, e.g. "en"; empty = model default/auto. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FString Language;
+
+	/** "transcribe" (default) or "translate". */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FString Task = TEXT("transcribe");
+};
+
+/** SenseVoice model path + options (offline). */
+USTRUCT(BlueprintType)
+struct INOSHERPA_API FInoSTTSenseVoiceConfig
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FString ModelPath;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FString Language = TEXT("auto");
+
+	/** Inverse text normalization (digits, punctuation). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	bool bUseItn = true;
+};
+
+/** Moonshine model paths (offline). */
+USTRUCT(BlueprintType)
+struct INOSHERPA_API FInoSTTMoonshineConfig
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FString PreprocessorPath;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FString EncoderPath;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FString UncachedDecoderPath;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FString CachedDecoderPath;
+};
+
+/**
+ * Offline (non-streaming, whole-utterance) recognizer configuration --
+ * maps to sherpa's SherpaOnnxOfflineRecognizerConfig. Higher accuracy
+ * than the streaming model at the cost of no live partials: results
+ * arrive only when a complete clip is transcribed.
+ * Set ModelType and fill the matching sub-struct; the others are ignored.
+ */
+USTRUCT(BlueprintType)
+struct INOSHERPA_API FInoSTTOfflineModelConfig
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	EInoSTTOfflineModelType ModelType = EInoSTTOfflineModelType::NemoTransducer;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FInoSTTOfflineTransducerConfig Transducer;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FInoSTTWhisperConfig Whisper;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FInoSTTSenseVoiceConfig SenseVoice;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FInoSTTMoonshineConfig Moonshine;
+
+	/** tokens.txt shipped next to the model (all families). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FString TokensPath;
+
+	/** 2 is a good default for 0.6B-class models on desktop CPUs. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	int32 NumThreads = 2;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	EInoSherpaProvider Provider = EInoSherpaProvider::Cpu;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	bool bDebug = false;
+
+	/** Model feature rate/dim; 16000/80 for the published models. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	int32 SampleRate = 16000;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	int32 FeatureDim = 80;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	FString DecodingMethod = TEXT("greedy_search");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InoSherpa|STT")
+	int32 MaxActivePaths = 4;
+};
+
 /** A recognition result -- partial (bIsFinal=false) or utterance-final. */
 USTRUCT(BlueprintType)
 struct INOSHERPA_API FInoSTTResult

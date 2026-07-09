@@ -301,4 +301,91 @@ FAutoConsoleCommand GSttAbortTestCmd(
 	TEXT("Ino.Sherpa.STT.AbortTest"),
 	TEXT("Ino.Sherpa.STT.AbortTest <mono.wav> -- StopStream mid-decode, then a fresh session; expects a clean FINAL from session 2."),
 	FConsoleCommandWithArgsDelegate::CreateStatic(&RunAbortTest));
+
+// ---- Offline (non-streaming) model tests -------------------------------
+
+void RunOfflineLoadTest(const TArray<FString>& Args)
+{
+	if (Args.Num() < 4)
+	{
+		UE_LOG(LogInoSherpa, Error, TEXT("Usage: Ino.Sherpa.STT.OfflineLoadTest <encoder.onnx> <decoder.onnx> <joiner.onnx> <tokens.txt>"));
+		return;
+	}
+	UInoSTT* Stt = GetStt();
+	if (Stt == nullptr) { return; }
+
+	FInoSTTOfflineModelConfig Config;
+	Config.ModelType = EInoSTTOfflineModelType::NemoTransducer;
+	Config.Transducer.EncoderPath = Args[0];
+	Config.Transducer.DecoderPath = Args[1];
+	Config.Transducer.JoinerPath  = Args[2];
+	Config.TokensPath             = Args[3];
+
+	FString Error;
+	if (Stt->LoadOfflineModel(Config, Error))
+	{
+		UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: OfflineLoadTest PASSED"));
+	}
+	else
+	{
+		UE_LOG(LogInoSherpa, Error, TEXT("STT.SmokeTest: OfflineLoadTest FAILED -- %s"), *Error);
+	}
+}
+
+void RunOfflineTranscribeTest(const TArray<FString>& Args)
+{
+	UInoSTT* Stt = GetStt();
+	if (Stt == nullptr) { return; }
+	if (!Stt->IsOfflineModelLoaded())
+	{
+		UE_LOG(LogInoSherpa, Error, TEXT("STT.SmokeTest: no offline model loaded -- run Ino.Sherpa.STT.OfflineLoadTest first"));
+		return;
+	}
+
+	TArray<float> Samples;
+	int32 Rate = 0;
+	if (!LoadWavArg(Args, Samples, Rate)) { return; }
+
+	const double Start = FPlatformTime::Seconds();
+	const FInoSTTResult Result = Stt->TranscribeOfflineFloat(Samples, Rate);
+	UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: OfflineTranscribeTest %s -- '%s' (%.2fs)"),
+		Result.Text.IsEmpty() ? TEXT("produced NO text") : TEXT("PASSED"),
+		*Result.Text, FPlatformTime::Seconds() - Start);
+}
+
+void RunOfflineTranscribeAsyncTest(const TArray<FString>& Args)
+{
+	UInoSTT* Stt = GetStt();
+	if (Stt == nullptr) { return; }
+	if (!Stt->IsOfflineModelLoaded())
+	{
+		UE_LOG(LogInoSherpa, Error, TEXT("STT.SmokeTest: no offline model loaded -- run Ino.Sherpa.STT.OfflineLoadTest first"));
+		return;
+	}
+
+	TArray<float> Samples;
+	int32 Rate = 0;
+	if (!LoadWavArg(Args, Samples, Rate)) { return; }
+
+	GActiveSttHelper.Reset(NewObject<UInoSherpaSttSmokeHelper>());
+	FInoSTTFinalDelegate OnComplete;
+	OnComplete.BindDynamic(GActiveSttHelper.Get(), &UInoSherpaSttSmokeHelper::HandleFinal);
+	Stt->TranscribeOfflineAsync(Samples, Rate, OnComplete);
+	UE_LOG(LogInoSherpa, Log, TEXT("STT.SmokeTest: OfflineTranscribeAsyncTest started; expecting a FINAL"));
+}
+
+FAutoConsoleCommand GSttOfflineLoadTestCmd(
+	TEXT("Ino.Sherpa.STT.OfflineLoadTest"),
+	TEXT("Ino.Sherpa.STT.OfflineLoadTest <encoder.onnx> <decoder.onnx> <joiner.onnx> <tokens.txt> -- sync offline (NeMo transducer / Parakeet) load."),
+	FConsoleCommandWithArgsDelegate::CreateStatic(&RunOfflineLoadTest));
+
+FAutoConsoleCommand GSttOfflineTranscribeTestCmd(
+	TEXT("Ino.Sherpa.STT.OfflineTranscribeTest"),
+	TEXT("Ino.Sherpa.STT.OfflineTranscribeTest <mono.wav> -- sync offline one-shot, logs the text."),
+	FConsoleCommandWithArgsDelegate::CreateStatic(&RunOfflineTranscribeTest));
+
+FAutoConsoleCommand GSttOfflineTranscribeAsyncTestCmd(
+	TEXT("Ino.Sherpa.STT.OfflineTranscribeAsyncTest"),
+	TEXT("Ino.Sherpa.STT.OfflineTranscribeAsyncTest <mono.wav> -- async offline one-shot via delegate."),
+	FConsoleCommandWithArgsDelegate::CreateStatic(&RunOfflineTranscribeAsyncTest));
 } // namespace
