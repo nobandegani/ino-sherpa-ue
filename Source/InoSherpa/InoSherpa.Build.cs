@@ -30,16 +30,24 @@ public class InoSherpa : ModuleRules
 			}
 			);
 
-		// sherpa-onnx C API headers, consumed straight from the vendored
-		// submodule (the static release archives ship no headers; the setup
-		// script enforces submodule tag == SHERPA_VERSION). PRIVATE include
-		// path on purpose: sherpa types never leak past this module --
-		// consumers only see the Ino* API in Public/.
-		string VendorDir = Path.Combine(PluginDirectory, "Vendor", "sherpa-onnx");
-		PrivateIncludePaths.Add(VendorDir); // -> #include "sherpa-onnx/c-api/c-api.h"
+		// sherpa-onnx is linked on Win64 ONLY for now. Every other platform
+		// (Android packaging in particular) still compiles this module so the
+		// UInoTTS / UInoSTT classes exist for cooked Blueprint references,
+		// but all sherpa call sites are compiled out behind WITH_INO_SHERPA
+		// and model loads fail gracefully at runtime instead of at link time.
+		bool bWithSherpa = Target.Platform == UnrealTargetPlatform.Win64;
+		PrivateDefinitions.Add("WITH_INO_SHERPA=" + (bWithSherpa ? "1" : "0"));
 
-		if (Target.Platform == UnrealTargetPlatform.Win64)
+		if (bWithSherpa)
 		{
+			// sherpa-onnx C API headers, consumed straight from the vendored
+			// submodule (the static release archives ship no headers; the setup
+			// script enforces submodule tag == SHERPA_VERSION). PRIVATE include
+			// path on purpose: sherpa types never leak past this module --
+			// consumers only see the Ino* API in Public/.
+			string VendorDir = Path.Combine(PluginDirectory, "Vendor", "sherpa-onnx");
+			PrivateIncludePaths.Add(VendorDir); // -> #include "sherpa-onnx/c-api/c-api.h"
+
 			// Win64: the official win-x64-static-MD-Release-lib package,
 			// staged by SherpaOnnx/scripts/setup-sherpa-onnx.ps1. Everything
 			// (sherpa + its CPU-only ONNX Runtime + espeak-ng/kaldi/piper
@@ -90,8 +98,10 @@ public class InoSherpa : ModuleRules
 			// PublicSystemLibraries.AddRange(new string[] { "advapi32.lib", "ws2_32.lib" });
 		}
 
-		// Android (phase 2): static libs self-built from Vendor/sherpa-onnx
-		// (SHERPA_ONNX_ENABLE_C_API=ON, JNI=OFF, static ORT). See CLAUDE.md.
+		// Real Android support (phase 2): static libs self-built from
+		// Vendor/sherpa-onnx (SHERPA_ONNX_ENABLE_C_API=ON, JNI=OFF, static
+		// ORT). See CLAUDE.md. Until then Android builds get the
+		// WITH_INO_SHERPA=0 stub above.
 		// iOS / macOS (phase 3): official static release artifacts.
 	}
 }

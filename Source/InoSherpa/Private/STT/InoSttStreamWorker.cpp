@@ -9,6 +9,8 @@
 #include "Async/Async.h"
 #include "HAL/PlatformProcess.h"
 
+#if WITH_INO_SHERPA
+
 #include "sherpa-onnx/c-api/c-api.h"
 
 FInoSttStreamWorker::FInoSttStreamWorker(const TSharedPtr<FInoSttRecognizer, ESPMode::ThreadSafe>& InRecognizer,
@@ -280,3 +282,45 @@ void FInoSttStreamWorker::DispatchSessionDead() const
 		}
 	});
 }
+
+#else // !WITH_INO_SHERPA -- stub platform, see InoSherpa.Build.cs
+
+// Unreachable in practice: FInoSttRecognizer::Create always fails on stub
+// platforms, so the subsystem never constructs a worker. Stream stays null
+// -> IsHealthy() is false and the owner drops the worker immediately.
+FInoSttStreamWorker::FInoSttStreamWorker(const TSharedPtr<FInoSttRecognizer, ESPMode::ThreadSafe>& InRecognizer,
+	const TWeakObjectPtr<UInoSTT>& InWeakOwner, int32 InSessionSerial)
+	: Recognizer(InRecognizer)
+	, WeakOwner(InWeakOwner)
+	, SessionSerial(InSessionSerial)
+{
+	UE_LOG(LogInoSherpa, Error, TEXT("InoSherpa: sherpa-onnx is not built for this platform (Win64 only for now)"));
+}
+
+FInoSttStreamWorker::~FInoSttStreamWorker()
+{
+}
+
+void FInoSttStreamWorker::EnqueuePush(TArray<float>&& Samples, int32 SampleRate)
+{
+}
+
+void FInoSttStreamWorker::EnqueueFinish()
+{
+}
+
+void FInoSttStreamWorker::EnqueueReset()
+{
+}
+
+void FInoSttStreamWorker::Stop()
+{
+	bStopRequested = true;
+}
+
+uint32 FInoSttStreamWorker::Run()
+{
+	return 0;
+}
+
+#endif // WITH_INO_SHERPA

@@ -5,6 +5,8 @@
 #include "InoSherpa.h"
 #include "InoSherpaPcm.h"
 
+#if WITH_INO_SHERPA
+
 #include "sherpa-onnx/c-api/c-api.h"
 
 namespace
@@ -213,3 +215,36 @@ FInoTTSResult FInoTtsEngine::Generate(const FString& Text, const FInoTTSOptions&
 	SherpaOnnxDestroyOfflineTtsGeneratedAudio(Audio);
 	return Result;
 }
+
+#else // !WITH_INO_SHERPA -- stub platform, see InoSherpa.Build.cs
+
+TSharedPtr<FInoTtsEngine, ESPMode::ThreadSafe> FInoTtsEngine::Create(const FInoTTSModelConfig& Config, FString& OutError)
+{
+	OutError = TEXT("InoSherpa: sherpa-onnx is not built for this platform (Win64 only for now)");
+	return nullptr;
+}
+
+FInoTtsEngine::~FInoTtsEngine()
+{
+}
+
+int32 FInoTtsEngine::GetSampleRate() const
+{
+	return 0;
+}
+
+int32 FInoTtsEngine::GetNumSpeakers() const
+{
+	return 0;
+}
+
+FInoTTSResult FInoTtsEngine::Generate(const FString& Text, const FInoTTSOptions& Options,
+	const TSharedPtr<std::atomic<bool>, ESPMode::ThreadSafe>& CancelFlag,
+	const FChunkFn& ChunkFn) const
+{
+	FInoTTSResult Result;
+	Result.ErrorMessage = TEXT("InoSherpa: sherpa-onnx is not built for this platform (Win64 only for now)");
+	return Result;
+}
+
+#endif // WITH_INO_SHERPA

@@ -4,6 +4,8 @@
 
 #include "InoSherpa.h"
 
+#if WITH_INO_SHERPA
+
 #include "sherpa-onnx/c-api/c-api.h"
 
 namespace
@@ -164,3 +166,22 @@ FString FInoSttOfflineRecognizer::Transcribe(TArrayView<const float> Samples, in
 	SherpaOnnxDestroyOfflineStream(Stream);
 	return Text;
 }
+
+#else // !WITH_INO_SHERPA -- stub platform, see InoSherpa.Build.cs
+
+TSharedPtr<FInoSttOfflineRecognizer, ESPMode::ThreadSafe> FInoSttOfflineRecognizer::Create(const FInoSTTOfflineModelConfig& Config, FString& OutError)
+{
+	OutError = TEXT("InoSherpa: sherpa-onnx is not built for this platform (Win64 only for now)");
+	return nullptr;
+}
+
+FInoSttOfflineRecognizer::~FInoSttOfflineRecognizer()
+{
+}
+
+FString FInoSttOfflineRecognizer::Transcribe(TArrayView<const float> Samples, int32 SampleRate) const
+{
+	return FString();
+}
+
+#endif // WITH_INO_SHERPA
