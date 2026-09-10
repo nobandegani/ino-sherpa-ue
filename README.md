@@ -36,7 +36,7 @@ Windows target will actually synthesize and transcribe.
 
 - **Unreal Engine 5.8**
 - **Windows 10 1803+** for the setup script (`tar.exe`), Visual Studio toolchain for building
-- **[InoNodes](https://github.com/nobandegani)** — companion Inoland plugin providing the resumable file downloader that model auto-download is built on. *Not yet public; being published separately.* Until it is, external builds will fail at the `InoDownloader.h` include.
+- **[InoNodes](https://github.com/nobandegani/ino-nodes-ue)** — companion Inoland plugin providing the resumable file downloader that model auto-download is built on. Install it alongside InoSherpa in your `Plugins/` directory.
 - ~1 GB of disk for the staged static libs, plus model storage
 
 ---
