@@ -264,7 +264,14 @@ assets exist only for tags.
 ## License
 
 InoSherpa's own source is licensed under the **Mozilla Public License 2.0**
-— see [LICENSE](LICENSE).
+— see [LICENSE](LICENSE). Every source file carries the standard MPL
+Exhibit A notice.
+
+> Those notices deliberately **omit** the "Incompatible With Secondary
+> Licenses" marking. That omission is load-bearing: MPL-2.0 §3.3 only permits
+> combining MPL code with GPL code when the files are *not* so marked, and the
+> TTS path below links GPL-3.0 libraries. Adding that marking would make the
+> TTS build unlawful to distribute.
 
 ### Third-party components
 
@@ -298,8 +305,23 @@ The plugin statically links the following into its module binary:
 > the link in the first place. Just removing the libraries will fail to
 > link.
 
-Speech models are licensed separately by their respective publishers —
-check the license of any model you ship.
+### Speech models
+
+Models are **not** in this repository — `SherpaOnnx/scripts/get-dev-models.ps1`
+downloads them from sherpa-onnx's release assets. They are licensed separately
+by their publishers, and the defaults are not uniform:
+
+| Model | Used by | Origin |
+|---|---|---|
+| `vits-piper-en_US-libritts_r-medium` | TTS | Piper / VITS, trained on LibriTTS-R |
+| `sherpa-onnx-streaming-zipformer-en-2023-06-26` | STT (streaming) | k2-fsa |
+| `sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8` | STT (offline) | **NVIDIA NeMo** |
+
+> **Check each model's license before shipping it** — particularly the NVIDIA
+> Parakeet one, since NeMo model releases carry their own terms that are not
+> the same as sherpa-onnx's Apache-2.0 code license, and LibriTTS-R-derived
+> voices carry attribution conditions. A model's license is independent of the
+> runtime's, and of this plugin's.
 
 ---
 
